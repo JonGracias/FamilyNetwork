@@ -24,7 +24,7 @@ LAN: `10.0.0.0/24` (DHCP from router; reservations recommended, not yet configur
 |----------|-------------|-----------------|----------------------------------------------------------------------|
 | Romulus  | 10.0.0.172  | Windows 11 Home | Main PC / admin workstation. Holds the SSH keypair (`jon@romulus`). |
 | Remoria  | 10.0.0.182  | Windows 11 Home | Staging box: Minecraft test servers pre-cloud; also the kid's Roblox PC. User: `jongr`. SSH working (key auth). |
-| Bubba    | TBD         | TBD             | Third PC — SSH setup planned after Remoria.                          |
+| Bubba    | 10.0.0.191  | Windows 11 Home | Third PC. User: `barto`. SSH working (key auth).                     |
 
 Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0.0.46) — leave it intact.
 
@@ -42,7 +42,7 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 ## Status / next steps
 
 1. ~~Remoria: SSH setup~~ DONE 2026-07-24 — `ssh remoria` works with key auth as `jongr`.
-2. Bubba: repeat the SSH setup.
+2. ~~Bubba: SSH setup~~ DONE 2026-07-24 — `ssh bubba` works with key auth as `barto`.
 3. Router: add DHCP reservations for Remoria and Bubba.
 4. Remoria: stand up Minecraft test-server hosting (Java runtime, firewall rules, service management).
 
