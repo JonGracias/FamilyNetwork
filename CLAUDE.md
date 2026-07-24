@@ -37,7 +37,11 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 
 ## Files
 
+- `README.md` — copy-paste setup commands for new machines + DHCP reservation table (IPs/MACs).
 - `setup-remoria-ssh.ps1` — one-time OpenSSH Server setup for Remoria; embeds Romulus's public key.
+- `setup-bubba-ssh.ps1` — same for Bubba; improved summary (real edition via CIM, `whoami`, MAC).
+
+Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines fetch setup scripts with `irm` from raw.githubusercontent.com. Nothing secret goes in this repo (public keys are fine; passwords/private keys never).
 
 ## Status / next steps
 
