@@ -36,5 +36,6 @@ Router admin: http://10.0.0.1 (or the Xfinity app) → **Connected Devices** →
 
 | Device  | Reserve IP  | MAC address         |
 |---------|-------------|---------------------|
+| Romulus | 10.0.0.172  | `7C-B5-66-43-20-4C` |
 | Remoria | 10.0.0.182  | `70-15-FB-90-BD-CF` |
 | Bubba   | 10.0.0.191  | `30-F6-EF-8B-D3-46` |
