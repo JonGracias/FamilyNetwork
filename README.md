@@ -29,3 +29,12 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 When it finishes, report the **SSH username** line back — that's the name Romulus connects as.
+
+## Router: DHCP reservations
+
+Router admin: http://10.0.0.1 (or the Xfinity app) → **Connected Devices** → select device → **Edit** → IP assignment: **Reserved IP**.
+
+| Device  | Reserve IP  | MAC address         |
+|---------|-------------|---------------------|
+| Remoria | 10.0.0.182  | `70-15-FB-90-BD-CF` |
+| Bubba   | 10.0.0.191  | `30-F6-EF-8B-D3-46` |
