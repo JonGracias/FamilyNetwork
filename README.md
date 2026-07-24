@@ -18,3 +18,14 @@ Afterwards, from Romulus:
 ```powershell
 ssh remoria
 ```
+
+## Bubba: one-time SSH server setup
+
+On **Bubba**, open Terminal as Administrator (right-click Start → **Terminal (Admin)**) and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/JonGracias/FamilyNetwork/main/setup-bubba-ssh.ps1 -OutFile setup.ps1
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+When it finishes, report the **SSH username** line back — that's the name Romulus connects as.
