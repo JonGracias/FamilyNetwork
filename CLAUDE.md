@@ -22,8 +22,8 @@ LAN: `10.0.0.0/24` (DHCP from router; reservations recommended, not yet configur
 
 | Machine  | IP          | OS              | Role                                                                 |
 |----------|-------------|-----------------|----------------------------------------------------------------------|
-| Romulus  | DHCP        | Windows 11 Home | Main PC / admin workstation. Holds the SSH keypair (`jon@romulus`). |
-| Remoria  | 10.0.0.182  | Windows (TBD)   | Staging box: Minecraft test servers pre-cloud; also the kid's Roblox PC. |
+| Romulus  | 10.0.0.172  | Windows 11 Home | Main PC / admin workstation. Holds the SSH keypair (`jon@romulus`). |
+| Remoria  | 10.0.0.182  | Windows 11 Home | Staging box: Minecraft test servers pre-cloud; also the kid's Roblox PC. User: `jongr`. SSH working (key auth). |
 | Bubba    | TBD         | TBD             | Third PC — SSH setup planned after Remoria.                          |
 
 Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0.0.46) — leave it intact.
@@ -41,7 +41,13 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 
 ## Status / next steps
 
-1. Remoria: waiting on `setup-remoria-ssh.ps1` to be run locally (admin), then verify `ssh remoria` from Romulus.
-2. Bubba: repeat the SSH setup once Remoria is confirmed.
+1. ~~Remoria: SSH setup~~ DONE 2026-07-24 — `ssh remoria` works with key auth as `jongr`.
+2. Bubba: repeat the SSH setup.
 3. Router: add DHCP reservations for Remoria and Bubba.
-4. Remoria: stand up Minecraft test-server hosting (Java runtime, firewall rules, service management) once remote access works.
+4. Remoria: stand up Minecraft test-server hosting (Java runtime, firewall rules, service management).
+
+## Lessons learned
+
+- `ssh-keygen -N '""'` in PowerShell sets a literal two-quote-character passphrase, not an empty one. Use `-N ''` (pwsh 7) and verify with `ssh-keygen -y -P '' -f <key>`. Symptom was `ssh_dispatch_run_fatal ... Unknown error [preauth]` in Remoria's OpenSSH/Operational event log.
+- `Get-ComputerInfoWindowsProductName` reports "Windows 10" on Windows 11 (registry quirk); trust `(Get-CimInstance Win32_OperatingSystem).Caption` instead.
+- Microsoft-account machines: the SSH username is the local profile folder name (e.g. `jongr`), not the email or display name. `whoami` on the target is the definitive answer.
