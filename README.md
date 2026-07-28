@@ -30,15 +30,6 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 When it finishes, report the **SSH username** line back — that's the name Romulus connects as.
 
-## Remoria: Minecraft hosting prep
-
-Done 2026-07-28 (Temurin JDK 21 + firewall TCP 25565, Private/LAN-only). Idempotent — to re-run or repair, from an admin terminal on Remoria:
-
-```powershell
-irm https://raw.githubusercontent.com/JonGracias/FamilyNetwork/main/setup-remoria-minecraft.ps1 -OutFile setup-mc.ps1
-powershell -ExecutionPolicy Bypass -File .\setup-mc.ps1
-```
-
 ## Diagnostics
 
 Two read-only health checks, runnable on any machine. From Romulus, over SSH (piping to `powershell -Command -` mangles multi-line scripts — encode instead):
