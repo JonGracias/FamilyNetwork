@@ -42,6 +42,7 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 - `setup-bubba-ssh.ps1` — same for Bubba; improved summary (real edition via CIM, `whoami`, MAC).
 - `diag-system.ps1` — read-only general health check (OS/CPU/RAM/disks, Java, network, firewall, sshd, power plan, recent errors, pending reboot). Machine-agnostic; run on any box.
 - `diag-disk.ps1` — read-only storage deep-dive: disk→letter map, SMART raw attributes, dirty-shutdown forensics (Event 41 BugcheckCode/PowerButtonTimestamp), Event 153/140/129 history.
+- `setup-remoria-minecraft.ps1` — idempotent Minecraft-hosting prep: Temurin JDK 21 (Adoptium MSI, system PATH + JAVA_HOME) and inbound TCP 25565 (Private profile, LocalSubnet only).
 
 Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines fetch setup scripts with `irm` from raw.githubusercontent.com. Nothing secret goes in this repo (public keys are fine; passwords/private keys never).
 
@@ -51,7 +52,7 @@ Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines f
 2. ~~Bubba: SSH setup~~ DONE 2026-07-24 — `ssh bubba` works with key auth as `barto`.
 3. Router: add DHCP reservations for Remoria and Bubba.
 4. Remoria: fix D: SATA connection. Diagnosed 2026-07-28: daily freezes (8 dirty boots/week, kid held power button) traced to the 2 TB Seagate ST2000DM008 (Disk 0 = D:) — 2,336 UDMA CRC errors (cable fingerprint), zero G-sense/reallocated/pending (not drop damage, media fine), Event 153 jumped from 5 in 9 months to 872 in the last week of July (onset coincides with in-case power-cable work). Fix: power off, reseat/replace SATA data + power connectors, different mobo port. Verify with `diag-disk.ps1`: CRC count stopped climbing (baseline 2,336) and Event 153 quiet. D: holds only reinstallable game installs, no save data — no backup needed. No Minecraft worlds on D: until verified.
-5. Remoria: stand up Minecraft test-server hosting (Java runtime, firewall rules, service management). Note: Java not yet installed; box is on Wi-Fi (consider Ethernet); put worlds on C: until D: is trusted.
+5. Remoria: stand up Minecraft test-server hosting. Prep DONE 2026-07-28 via `setup-remoria-minecraft.ps1`: Temurin JDK 21.0.11 LTS on PATH, firewall TCP 25565 open (Private, LocalSubnet only). Remaining: server install + service management. Put worlds on C: until D: is trusted (step 4); box is on Wi-Fi (consider Ethernet for real testing).
 
 ## Lessons learned
 
