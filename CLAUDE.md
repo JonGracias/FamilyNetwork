@@ -42,6 +42,8 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 - `setup-bubba-ssh.ps1` — same for Bubba; improved summary (real edition via CIM, `whoami`, MAC).
 - `diag-system.ps1` — read-only general health check (OS/CPU/RAM/disks, Java, network, firewall, sshd, power plan, recent errors, pending reboot). Machine-agnostic; run on any box.
 - `diag-disk.ps1` — read-only storage deep-dive: disk→letter map, SMART raw attributes, dirty-shutdown forensics (Event 41 BugcheckCode/PowerButtonTimestamp), Event 153/140/129 history.
+- `setup-ssh-harden.ps1` — disables SSH password + keyboard-interactive auth (key-only). Machine-agnostic; prepends directives above the Match block, backs up sshd_config first.
+- `watch-remoria-disk.ps1` — runs on Romulus via Scheduled Task ("FamilyNetwork - Remoria disk watch", Mondays 10:00, auto-expires ~2026-09-01): polls Remoria's CRC counter + Event 153 over SSH, logs to `logs/` (gitignored), writes a desktop ALERT file if CRC climbs.
 
 Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines fetch setup scripts with `irm` from raw.githubusercontent.com. Nothing secret goes in this repo (public keys are fine; passwords/private keys never).
 
@@ -52,6 +54,10 @@ Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines f
 3. Router: add DHCP reservations for Remoria and Bubba.
 4. Remoria: fix D: SATA connection. Diagnosed 2026-07-28: daily freezes (8 dirty boots/week, kid held power button) traced to the 2 TB Seagate ST2000DM008 (Disk 0 = D:) — 2,336 UDMA CRC errors (cable fingerprint), zero G-sense/reallocated/pending (not drop damage, media fine), Event 153 jumped from 5 in 9 months to 872 in the last week of July (onset coincides with in-case power-cable work). Fix: power off, reseat/replace SATA data + power connectors, different mobo port. Verify with `diag-disk.ps1`: CRC count stopped climbing (baseline 2,336) and Event 153 quiet. D: holds only reinstallable game installs, no save data — no backup needed. No Minecraft worlds on D: until verified.
 5. ~~Remoria: machine readiness for Minecraft hosting~~ DONE 2026-07-28 — Temurin JDK 21.0.11 LTS installed (system PATH + JAVA_HOME), inbound TCP 25565 open (Private profile, LocalSubnet only). The server itself (install, worlds, service management) is out of scope — separate project/agent. Constraints to pass along: keep worlds on C: until D: is trusted (step 4); box is on Wi-Fi (consider Ethernet for real testing).
+6. ~~Firewalls re-enabled~~ DONE 2026-07-28 — found Windows Firewall fully DISABLED (Private+Public) on both Remoria and Bubba; re-enabled all profiles on both. Bubba's Wi-Fi was also misclassified Public → set to Private. Open question for the household: who turned them off, and why (game troubleshooting?). Watch that they stay on.
+7. ~~SSH hardening~~ DONE 2026-07-28 — `setup-ssh-harden.ps1` run on Remoria and Bubba: password + keyboard-interactive auth off, verified key-only (`Permission denied (publickey)`).
+8. Baselines run 2026-07-28 on all three machines (`diag-system.ps1`). Notables: Bubba is an i5-1335U/16GB laptop, healthy, but runs ancient Oracle Java 8 (fine unless something needs newer); Romulus healthy. Remoria disk watch scheduled on Romulus (weekly, auto-expires ~2026-09-01).
+9. Remoria: consider Ethernet before real Minecraft testing (currently Wi-Fi).
 
 ## Lessons learned
 
@@ -61,3 +67,5 @@ Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines f
 - Running multi-line PowerShell over SSH: piping a script to `powershell -Command -` executes it line-by-line and mangles blocks/variables. Base64-encode the script as UTF-16LE and use `powershell -NoProfile -EncodedCommand <b64>` instead (see README "Diagnostics").
 - SMART "Healthy" only means no attribute crossed its failure threshold — it stays green through cable faults and stalls. Read the raw counters: 199 (UDMA CRC) = bad SATA data cable/connector, 191 (G-sense) = physical shock, 5/197/198 = failing media. Disk Event 153 storms + climbing CRC with clean media attributes = connection problem, not a dying drive.
 - A "frozen" Windows box with no BSOD and no events at freeze time can be a stalled storage device: I/O blocks system-wide and even event logging stops, so the log shows silence before the dirty boot.
+- Firewall rules mean nothing if the firewall is off: both kids' PCs had Defender Firewall silently disabled (Private+Public). `Get-NetFirewallProfile` (check `Enabled`) before trusting any rule; also check `Get-NetConnectionProfile` — a home LAN misclassified as Public makes every Private-scoped rule inert. Symptom that gave it away: SSH worked on a box whose only port-22 rule was Private-profile while its network was Public.
+- Disabling SSH password auth on Windows needs BOTH `PasswordAuthentication no` and `KbdInteractiveAuthentication no` — keyboard-interactive is the password prompt most clients actually use. Prepend at the top of sshd_config: appending lands inside the trailing `Match Group administrators` block.
