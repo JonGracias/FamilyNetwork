@@ -44,12 +44,22 @@ ssh remoria "powershell -NoProfile -EncodedCommand $b64"
 
 Swap the script name and host alias (`remoria`, `bubba`) as needed. Both scripts only read state — safe to run while the machine is in use.
 
-## Router: DHCP reservations
+## Addressing: no DHCP reservations available
 
-Router admin: http://10.0.0.1 (or the Xfinity app) → **Connected Devices** → select device → **Edit** → IP assignment: **Reserved IP**.
+Comcast/Xfinity no longer exposes reserved-IP assignment on this plan, so machine IPs can change. Rather than chase them, `~/.ssh/config` on Romulus points at **machine names**, which resolve on the LAN and follow the machine if its address changes:
 
-| Device  | Reserve IP  | MAC address         |
+```
+Host remoria
+  HostName remoria      # not 10.0.0.182
+  User jongr
+```
+
+Check resolution at any time with `Resolve-DnsName remoria` (`remoria.local` also works). Current addresses, for reference and as fallback if a name ever stops resolving:
+
+| Device  | IP (current)| MAC address         |
 |---------|-------------|---------------------|
 | Romulus | 10.0.0.172  | `7C-B5-66-43-20-4C` |
 | Remoria | 10.0.0.182  | `70-15-FB-90-BD-CF` |
 | Bubba   | 10.0.0.191  | `30-F6-EF-8B-D3-46` |
+
+Note: `known_hosts` is keyed by the exact string you connect to. After switching an entry from an IP to a name, SSH will report `Host key verification failed` until the key is recorded under the new name — verify with `ssh-keyscan` that it matches the IP's stored key before adding it.
