@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>datakiin — lab</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a20; --line:#262a32;
+    --ink:#e8eaee; --dim:#9aa0ab; --accent:#6ea8fe; --ok:#4ade80;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --panel:#fff; --line:#e2e5ea; --ink:#14171c; --dim:#5c636e; --accent:#2563eb; --ok:#16a34a; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .wrap{width:100%; max-width:680px}
+  .badge{
+    display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--ok);
+    border:1px solid var(--line); background:var(--panel);
+    padding:6px 12px; border-radius:999px; margin-bottom:20px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+       box-shadow:0 0 0 0 rgba(74,222,128,.6); animation:p 2s infinite}
+  @keyframes p{70%{box-shadow:0 0 0 8px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+  h1{font-size:clamp(28px,6vw,42px); margin:0 0 8px; letter-spacing:-.02em}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--dim); margin:0 0 28px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px}
+  .card h2{font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); margin:0 0 14px; font-weight:700}
+  dl{display:grid; grid-template-columns:auto 1fr; gap:10px 18px; margin:0; font-size:14px}
+  dt{color:var(--dim)}
+  dd{margin:0; font-family:ui-monospace,Consolas,Menlo,monospace}
+  .path{display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:14px; font-family:ui-monospace,Consolas,Menlo,monospace}
+  .hop{border:1px solid var(--line); border-radius:8px; padding:7px 11px; background:var(--bg)}
+  .arw{color:var(--dim)}
+  footer{color:var(--dim); font-size:13px; text-align:center; margin-top:24px}
+  code{background:var(--bg); border:1px solid var(--line); padding:1px 6px; border-radius:5px; font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="badge"><span class="dot"></span> tunnel online</div>
+
+  <h1>datakiin<span>.</span>lab</h1>
+  <p class="sub">If you can read this, the Cloudflare tunnel reached the container — the public path works end to end.</p>
+
+  <div class="card">
+    <h2>Request path</h2>
+    <div class="path">
+      <span class="hop">you</span><span class="arw">→</span>
+      <span class="hop">Cloudflare edge</span><span class="arw">→</span>
+      <span class="hop">cloudflared</span><span class="arw">→</span>
+      <span class="hop">nginx</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Host</h2>
+    <dl>
+      <dt>machine</dt><dd>labserver — Debian 13</dd>
+      <dt>cpu / ram</dt><dd>i7-10700 · 62 GB</dd>
+      <dt>gpu</dt><dd>RTX 3060 12 GB · CUDA 12.4</dd>
+      <dt>volume</dt><dd>DATAKIIN · 3.6 T</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Notes</h2>
+    <p style="margin:0;color:var(--dim);font-size:14px">
+      Public tier only. No inbound ports are open — <code>cloudflared</code> dials out.
+      Private services (photos, files, AI) stay on the mesh and are never published here.
+      Game traffic does not ride this tunnel.
+    </p>
+  </div>
+
+  <footer>staging page · replace when the real site ships</footer>
+</div>
+</body>
+</html>

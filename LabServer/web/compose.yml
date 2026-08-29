@@ -1,0 +1,16 @@
+# Static test site for proving the public path.
+# Publishes NO host ports -- cloudflared reaches it over the shared `edge`
+# network, so the only way in is through the tunnel.
+services:
+  web:
+    image: nginx:alpine
+    container_name: web
+    restart: unless-stopped
+    volumes:
+      - /srv/datakiin/stacks/web/site:/usr/share/nginx/html:ro
+    networks: [edge]
+
+networks:
+  edge:
+    name: edge
+    external: true
