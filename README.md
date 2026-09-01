@@ -44,6 +44,28 @@ ssh remoria "powershell -NoProfile -EncodedCommand $b64"
 
 Swap the script name and host alias (`remoria`, `bubba`) as needed. Both scripts only read state — safe to run while the machine is in use.
 
+## Reaching services from outside (WireGuard relay)
+
+The house is behind a double NAT, so nothing inbound reaches it. The fix does **not**
+involve asking anyone to forward a port: a small VPS runs WireGuard, Romulus dials *out*
+to it, and the VPS forwards public ports back down that tunnel.
+
+```bash
+sudo bash wireguard/vps-check.sh                 # read-only: what's already set up?
+sudo bash wireguard/vps-apply-portmap.sh --dry-run   # preview the rules
+sudo bash wireguard/vps-apply-portmap.sh         # apply + persist
+```
+
+```powershell
+# on Romulus, admin terminal
+powershell -ExecutionPolicy Bypass -File .\wireguard\setup-romulus-wg.ps1 -VpsEndpoint <vps>:51820
+```
+
+Public ports live in one file, `wireguard/portmap.conf`. Minecraft is forwarded as a
+**range** (25560-25579 TCP, 24450-24469 UDP for voice), so adding a new world is a local
+change only — bind it to a free port in the range and it is public immediately, with no
+VPS edit. Full architecture, DNS cutover and security notes: **[wireguard/README.md](wireguard/README.md)**.
+
 ## Addressing: no DHCP reservations available
 
 Comcast/Xfinity no longer exposes reserved-IP assignment on this plan, so machine IPs can change. Rather than chase them, `~/.ssh/config` on Romulus points at **machine names**, which resolve on the LAN and follow the machine if its address changes:

@@ -43,6 +43,12 @@ Existing SSH config on Romulus also has a pre-existing `datakiin.dev` host (10.0
 - `diag-system.ps1` — read-only general health check (OS/CPU/RAM/disks, Java, network, firewall, sshd, power plan, recent errors, pending reboot). Machine-agnostic; run on any box.
 - `diag-disk.ps1` — read-only storage deep-dive: disk→letter map, SMART raw attributes, dirty-shutdown forensics (Event 41 BugcheckCode/PowerButtonTimestamp), Event 153/140/129 history.
 - `setup-ssh-harden.ps1` — disables SSH password + keyboard-interactive auth (key-only). Machine-agnostic; prepends directives above the Match block, backs up sshd_config first.
+- `wireguard/` — the VPS relay that gets LAN services onto the internet **without any port forwarding on either router** (see `wireguard/README.md` for the architecture and why Danny is not needed):
+  - `wireguard/README.md` — architecture, DNS cutover, security posture, verification.
+  - `wireguard/portmap.conf` — the single source of truth for public ports. Edit this, re-run the apply script. Uses ranges so new Minecraft worlds need no VPS change.
+  - `wireguard/vps-check.sh` — read-only VPS state check. Run first, always.
+  - `wireguard/vps-apply-portmap.sh` — renders `portmap.conf` into an nftables DNAT table (atomic, idempotent, own table only). `--dry-run` prints without applying.
+  - `wireguard/setup-romulus-wg.ps1` — home-side client + the tunnel-subnet firewall rules.
 - `watch-remoria-disk.ps1` — runs on Romulus via Scheduled Task ("FamilyNetwork - Remoria disk watch", Mondays 10:00, auto-expires ~2026-09-01): polls Remoria's CRC counter + Event 153 over SSH, logs to `logs/` (gitignored), writes a desktop ALERT file if CRC climbs.
 
 Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines fetch setup scripts with `irm` from raw.githubusercontent.com. Nothing secret goes in this repo (public keys are fine; passwords/private keys never).
@@ -59,6 +65,20 @@ Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines f
 8. Baselines run 2026-07-28 on all three machines (`diag-system.ps1`). Notables: Bubba is an i5-1335U/16GB laptop, healthy, but runs ancient Oracle Java 8 (fine unless something needs newer); Romulus healthy. Remoria disk watch scheduled on Romulus (weekly, auto-expires ~2026-09-01).
 9. ~~Remoria: consider Ethernet~~ NOT NEEDED 2026-07-29 — measured instead of assumed: Intel AX210 Wi-Fi 6E on the **6 GHz** band, ch 69, 802.11ax/WPA3, RSSI -46 dBm (90%), 2.4 Gbps rx / 2.16 Gbps tx, 2.0 Gbps link. Romulus→Remoria ICMP: 0% loss, sub-1 ms. TCP-connect latency (spaced samples) 2.7–6.8 ms, sd ~1 ms. 6 GHz is uncongested and far exceeds what a Minecraft server needs (a few kbps/player; latency stability is what matters). No cable run required — closing this.
 
+10. **WireGuard relay — DESIGNED 2026-09-01, not yet deployed.** Goal: reach Minecraft,
+   Jellyfin, two websites and an API from outside, while keeping the double NAT intact.
+   Key finding: **Danny is not needed.** A VPS relay works because the home box dials
+   *outbound*; nothing inbound is opened on either router. Diagnosis from public DNS:
+   `survival.datakiin.com` is a CNAME to `home.datakiin.com` = `76.100.245.192`, i.e. the
+   installers already in players' hands point at the house's own WAN address, behind the
+   double NAT — which is exactly why nobody can connect. No `vps.`/`wg.`/`mc.` record
+   exists yet, so the VPS is still to be provisioned. Ports 25568 (superflat) and 25569
+   (normal-survival) are load-bearing — they are baked into shipped installers in
+   MCServers `docs/` and must keep their numbers. SSH, Jellyfin and the web ports ship
+   disabled by deliberate choice. Next: provision the VPS, run `wireguard/vps-check.sh`,
+   then follow `wireguard/README.md`. **Nothing has been run against live infrastructure
+   yet** — the scripts are validated (see below) but unproven end to end.
+
 ## Lessons learned
 
 - `ssh-keygen -N '""'` in PowerShell sets a literal two-quote-character passphrase, not an empty one. Use `-N ''` (pwsh 7) and verify with `ssh-keygen -y -P '' -f <key>`. Symptom was `ssh_dispatch_run_fatal ... Unknown error [preauth]` in Remoria's OpenSSH/Operational event log.
@@ -72,3 +92,26 @@ Repo is public at https://github.com/JonGracias/FamilyNetwork — new machines f
 - Changing `HostName` in `~/.ssh/config` from an IP to a name breaks login with `Host key verification failed` — known_hosts is keyed by the string you connect to. Don't blind-accept the "new" key: confirm `ssh-keyscan <name>` matches the stored entry for the old IP, then copy that verified entry under the new name.
 - Benchmark artifacts look like network problems. Back-to-back TCP connects to sshd measured ~10 ms jitter with 50 ms spikes; the same test spaced 500 ms apart gave ~1 ms sd. The spikes were sshd/firewall handling a connect flood, not the Wi-Fi. Space out samples before concluding the link is bad — and don't "fix" a setting based on the fast-loop number.
 - SMART attribute InstanceName encodes the SATA port (`...&0&030000` vs `...&0&020000`). Handy for confirming someone actually moved a drive to a different port.
+- A double NAT does not have to be solved by port forwarding, and usually should not be.
+  Outbound connections traverse any number of NAT layers, so a VPN tunnel dialled *out* to
+  a VPS turns "I need the router admin to forward a port" into a problem you can solve
+  alone. Reach for the relay before reaching for the router owner — and never accept a DMZ
+  as the "easy" alternative; it forwards every port instead of one.
+- Windows firewall rules scoped `-RemoteAddress LocalSubnet` do **not** match traffic
+  arriving over a VPN tunnel — that traffic is sourced from the tunnel subnet (10.8.0.1),
+  which is not the local subnet. Every forwarded connection dies silently with the tunnel
+  showing a healthy handshake. Services reachable over a tunnel need rules scoped to the
+  tunnel subnet explicitly.
+- Port-scanning from inside a sandboxed/proxied environment is worthless unless the control
+  passes first. An egress proxy answers 80/443 itself — a TLS handshake there returned a
+  cert issued by the *proxy's* CA, not the real host — so those ports look "open" no matter
+  what, while every other port looks "closed" because arbitrary TCP egress is blocked.
+  Test a known-open non-web port (e.g. `github.com:22`) as a control before believing any
+  result. Same lesson as the benchmark-artifact one above: verify the instrument first.
+- nftables: the base chain hook for source NAT is `postrouting`; `srcnat` is the *priority*
+  name, not a hook. `type nat hook srcnat` is rejected with "unknown chain hook". Always
+  `nft -c -f <file>` a generated ruleset before applying it.
+- The idempotent way to replace an nftables table is the three-line
+  `table ip X` / `delete table ip X` / `table ip X { ... }` idiom: the first line creates it
+  if absent so the delete cannot fail on a first run, and the whole swap is atomic. Keeping
+  rules in a dedicated table means ufw/docker rules are never disturbed.
