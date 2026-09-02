@@ -105,7 +105,7 @@ secret belongs in this repo.
 | labserver pubkey | `TXj5F/zRUranFo6czqbE3RKmfUCw6Qn/hW8n9IIAKy0=` — `10.10.0.2` |
 | Handshake | both directions, `PersistentKeepalive = 25` |
 | Latency | **0% loss, RTT 5.98 ms** VPS → labserver |
-| Learned endpoint | `71.166.138.197:57521` — Danny's Fios WAN |
+| Learned endpoint | `<DANNY-WAN>:57521` — Danny's Fios WAN |
 
 🔥 **That last row is the whole design working.** The VPS config has **no
 `Endpoint` line** for labserver; it learned the address from the first

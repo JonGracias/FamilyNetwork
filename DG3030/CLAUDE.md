@@ -67,8 +67,8 @@ Danny installed his **FortiGate 40F** during a shutdown he requested. labserver 
 |---|---|---|
 | labserver LAN address | `10.0.0.41/24` — **on the house LAN** | **`192.168.50.10/24`** |
 | default gateway | `10.0.0.1` (house router) | **`192.168.50.1`** (the FortiGate) |
-| public IPv6 on `enp2s0f0` | `2601:140:9202:6f00::40a9` | **gone** — link-local only |
-| WAN IP (unchanged) | `73.132.162.205` | `73.132.162.205` |
+| public IPv6 on `enp2s0f0` | `<DANNY-WAN-V6>` | **gone** — link-local only |
+| WAN IP (unchanged) | `<DANNY-WAN-COMCAST>` | `<DANNY-WAN-COMCAST>` |
 
 **The empirical test** — probed the house **gateway only** (`10.0.0.1`, infrastructure; deliberately *not* a personal machine):
 
@@ -93,7 +93,7 @@ ttl=2  10.0.0.1         the Comcast router
 ttl=4  68.87.137.141    Comcast infrastructure
 ```
 
-So the FortiGate holds an interface on `10.0.0.0/24` and the Comcast gateway is **not** bridged. This matters concretely: it is what makes the port-forward a **two-hop** chain, and it fixes the FortiGate VIP's "external IP" as its own `10.0.0.x` WAN address rather than the public `73.132.162.205`. Had the gateway been bridged, the router forward would not exist and the VIP would take the public IP — a materially different build.
+So the FortiGate holds an interface on `10.0.0.0/24` and the Comcast gateway is **not** bridged. This matters concretely: it is what makes the port-forward a **two-hop** chain, and it fixes the FortiGate VIP's "external IP" as its own `10.0.0.x` WAN address rather than the public `<DANNY-WAN-COMCAST>`. Had the gateway been bridged, the router forward would not exist and the VIP would take the public IP — a materially different build.
 
 ⚠️ **Still unknown: the FortiGate's actual WAN address, and whether it is static or a DHCP lease.** Unknowable from our side — labserver is blocked from `10.0.0.1` by design, and the FortiGate's admin interface is **not listening toward labserver** (`192.168.50.1` closed on 80/443/8080, which is correct hygiene). **Ask Danny; he may have set it statically already.** ⚠️ Note that nothing in this repo ever *measured* it as DHCP — an earlier draft of the runbook asserted it was, which was intent restated as fact.
 
@@ -219,7 +219,7 @@ The shift to internalize: **we traded "network membership = auth" for "real appl
 
 **A reverse proxy and a VPS are not alternatives.** The proxy terminates TLS and routes hostnames to backends — you need one either way. A VPS is merely *a public IP that isn't your house*. The real question is **where the proxy runs and how traffic reaches it**.
 
-✅ **Verified: the WAN IP is `73.132.162.205` — a real routable Comcast address, NOT CGNAT** (`100.64.0.0/10`). Inbound port-forwarding is therefore available, and that single fact is what makes the free path work. Under CGNAT a relay would have been compulsory.
+✅ **Verified: the WAN IP is `<DANNY-WAN-COMCAST>` — a real routable Comcast address, NOT CGNAT** (`100.64.0.0/10`). Inbound port-forwarding is therefore available, and that single fact is what makes the free path work. Under CGNAT a relay would have been compulsory.
 
 **Result for the web/media doors: $0/mo recurring, $0 one-time** (the FortiGate was already owned). The earlier "~$15–30/mo, VPS required" estimate is **withdrawn**. ⚠️ The *project* total is no longer $0 — the game door's VPS runs roughly **$4–5/mo**; see Cost.
 
@@ -388,7 +388,7 @@ Cloudflare → `datakiin.com` → **DNS** → **Records** → **Add record**:
 |---|---|
 | Type | **A** |
 | Name | `jellyfin` |
-| IPv4 address | **`73.132.162.205`** (Danny's WAN — *not* Jon's) |
+| IPv4 address | **`<DANNY-WAN-COMCAST>`** (Danny's WAN — *not* Jon's) |
 | Proxy status | 🔘 **DNS only — grey cloud** |
 | TTL | Auto (drop to 2 min while testing) |
 
@@ -396,11 +396,11 @@ Cloudflare → `datakiin.com` → **DNS** → **Records** → **Add record**:
 
 **A record, not AAAA:** labserver's public IPv6 disappeared when the FortiGate went in (`enp2s0f0` is link-local only now). There is nothing to point an AAAA at.
 
-🔴 **The DDNS gap — the trap in this step.** Comcast IPs are dynamic, and the existing Cloudflare-DDNS script updates **`home.datakiin.com`, which tracks *Jon's* house (`76.100.245.192`, the Romulus origin)**. Danny's WAN (`73.132.162.205`) is a **different address with no DDNS at all**. So:
+🔴 **The DDNS gap — the trap in this step.** Comcast IPs are dynamic, and the existing Cloudflare-DDNS script updates **`home.datakiin.com`, which tracks *Jon's* house (`<JON-WAN>`, the Romulus origin)**. Danny's WAN (`<DANNY-WAN-COMCAST>`) is a **different address with no DDNS at all**. So:
 
 - ❌ **Do not CNAME `jellyfin` → `home.datakiin.com`** — that points at the wrong house entirely.
 - A bare A record works **until Danny's lease changes**, then the door silently dies.
-- ✅ **Better shape, one extra record:** create **`dg.datakiin.com` A → `73.132.162.205`** (grey cloud) as the single place Danny's IP is written, point **`jellyfin` CNAME → `dg.datakiin.com`** (grey cloud), and run a DDNS updater **on labserver** against `dg`. Every future labserver hostname is then one CNAME, and the address lives in exactly one record — the same "never hard-code the address" reasoning that keeps `HostName` names in `~/.ssh/config`. The existing `CF_API_TOKEN` (Zone.DNS:Edit on `datakiin.com`) already has the permission to drive it.
+- ✅ **Better shape, one extra record:** create **`dg.datakiin.com` A → `<DANNY-WAN-COMCAST>`** (grey cloud) as the single place Danny's IP is written, point **`jellyfin` CNAME → `dg.datakiin.com`** (grey cloud), and run a DDNS updater **on labserver** against `dg`. Every future labserver hostname is then one CNAME, and the address lives in exactly one record — the same "never hard-code the address" reasoning that keeps `HostName` names in `~/.ssh/config`. The existing `CF_API_TOKEN` (Zone.DNS:Edit on `datakiin.com`) already has the permission to drive it.
 - Start with the plain A record to prove the chain, but **add DDNS before anyone relies on this.**
 
 Accepted by design: this record **publishes Danny's home IP**. That is the trade recorded under "Anonymity is per-audience" — and the reason Minecraft goes out through a VPS relay instead.
@@ -414,7 +414,7 @@ internet → Comcast router 10.0.0.1 → [forward 443] → FortiGate WAN
          → [VIP 443] → labserver 192.168.50.10:443 → Caddy
 ```
 
-⚠️ **This is a double NAT, and it sets the one value people get wrong:** the FortiGate's VIP **external IP is its own WAN address (`10.0.0.x`), not the public `73.132.162.205`.** Only the Comcast router ever sees the public address.
+⚠️ **This is a double NAT, and it sets the one value people get wrong:** the FortiGate's VIP **external IP is its own WAN address (`10.0.0.x`), not the public `<DANNY-WAN-COMCAST>`.** Only the Comcast router ever sees the public address.
 
 1. **Pin the FortiGate's WAN address first.** It currently takes a DHCP lease from the house router. Set it **static** on the FortiGate, outside the router's DHCP pool. A drifting lease breaks the forward months later, silently — and doing it on the FortiGate depends on nothing from Comcast's app.
 2. **House router:** forward **TCP 443** → the FortiGate's (now static) WAN address.
@@ -520,6 +520,20 @@ Three goals, not two:
 - Services run in **containers** (isolation + easy teardown). Document every new machine, service, port, or tunnel here.
 - **Bind addresses, not firewall rules** — `127.0.0.1:PORT:PORT` for anything Caddy fronts. Never a bare `PORT:PORT`.
 - Nothing secret in any repo (public keys fine; passwords/private keys/tunnel tokens never).
+- 🏠 **Never write a residential WAN address into this repo — use a placeholder.** Adopted 2026-09-02. The repo is public, so a literal home IP is published to anyone who reads it, and **it belongs to a third party who did not choose that.** Placeholders in use:
+
+  | Placeholder | Means |
+  |---|---|
+  | `<DANNY-WAN>` | Danny's current Verizon Fios WAN |
+  | `<DANNY-WAN-COMCAST>` | his previous Comcast WAN (historical references) |
+  | `<DANNY-WAN-V6>` | the public IPv6 labserver held before the FortiGate |
+  | `<JON-WAN>` | Romulus's house WAN |
+
+  **This costs nothing operationally** — every one of these is re-derivable in seconds from a machine that has access (`curl -4 ifconfig.me`, `wg show`, a `ttl=2` traceroute hop), so the digits were never load-bearing. What the docs actually need is *which* address is meant, and the placeholder says that better than a number that drifts anyway.
+
+  ⚠️ **Addresses that are fine to write literally:** the VPS (`172.233.207.73` — published in DNS by design), tailnet addresses (`100.64.0.0/10`, unroutable from outside), and every RFC1918 LAN address. The rule is about **residential** WANs specifically.
+
+  📌 **Going forward only — history was deliberately not rewritten.** The old values sit in commits up to `8af266c` and in any clone or fork made before then. Scrubbing forward is cheap; rewriting public history is messy and would not recall what is already distributed. **Do not read the absence of literals as the absence of exposure.**
 
 ## Container runtime — Docker, not Kubernetes (decided 2026-08-13)
 
@@ -557,7 +571,7 @@ Kubernetes is a *cluster* orchestrator — scheduling across nodes, failover, dr
   - ⚠️ **The `nvme1n1` / `nvme2n1` names SWAPPED between 2026-08-11 and 2026-09-02.** The 1 TB Kingston is now `nvme2n1` and the 500 GB Crucial is now `nvme1n1` — the reverse of what this document recorded. **Nothing moved physically; NVMe enumeration order is not stable across reboots.** The mount points are correct because `/etc/fstab` keys on UUID. Same lesson as `HostName` names in `~/.ssh/config` and the interface-name rule for Samba: **never key anything on `/dev/nvmeXn1`** — a script that did would now be writing to the wrong disk.
   - `sda` Seagate ST2000LM007 2 TB HDD → ext4 label `archive` at `/srv/archive` (was `/mnt/storage2`; changed by someone other than us — open item (d))
   - `sdb1` Seagate ST4000NM0085 4 TB → `/srv/datakiin` (see Jon's environment)
-- **Network — ✅ re-measured 2026-09-01, post-Fios.** LAN address, gateway and tailnet address all **unchanged** by the ISP swap. New public WAN **`71.166.138.197`** (Verizon; the Comcast `73.132.162.205` is gone), new house gateway **`192.168.1.1`**. **`enp2s0f0` negotiates 1000 Mb/s — the GbE cap is confirmed, not assumed**, so labserver's segment can never see the 5 Gig no matter what the ONT delivers.
+- **Network — ✅ re-measured 2026-09-01, post-Fios.** LAN address, gateway and tailnet address all **unchanged** by the ISP swap. New public WAN **`<DANNY-WAN>`** (Verizon; the Comcast `<DANNY-WAN-COMCAST>` is gone), new house gateway **`192.168.1.1`**. **`enp2s0f0` negotiates 1000 Mb/s — the GbE cap is confirmed, not assumed**, so labserver's segment can never see the 5 Gig no matter what the ONT delivers.
 - **Network (as of 2026-08-13, post-FortiGate):**
   - `enp2s0f0` UP at **`192.168.50.10/24`**, gw **`192.168.50.1`** (FortiGate). Public IPv6 **no longer present** — link-local only.
   - `tailscale0` **`100.86.218.41/32`** — **the stable address. Always use this.** The LAN address has now moved twice (`.40` → `.41` → `192.168.50.10`); never hard-code it.
@@ -717,7 +731,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
   | Served by | `Server: cloudflare`, `CF-RAY … -IAD` (Ashburn edge) |
   | `Server-Timing` | `cfEdge;dur=13, cfOrigin;dur=28` — tunnel live, 28 ms to origin |
   | DNS `A` / `AAAA` | Cloudflare anycast only (`172.67.171.159`, `104.21.71.201`, `2606:4700:…`) |
-  | **Origin IP `73.132.162.205`** | ✅ **absent from every DNS record and every response header** |
+  | **Origin IP `<DANNY-WAN-COMCAST>`** | ✅ **absent from every DNS record and every response header** |
   | Inbound ports opened | **none** — no port-forward, no FortiGate VIP, nothing on ufw |
 
   **The full path:** internet → Cloudflare edge → tunnel (outbound-initiated from labserver) → `edge` bridge → nginx. Nothing listens on labserver's LAN or tailnet for this, and the FortiGate needed no hole. This is the pattern every HTTP service should copy.
@@ -731,7 +745,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 
 ## Reference — how the *existing* Datakiin setup exposes things (verified 2026-08-10)
 
-- Cloudflare tunnel **"Datakiin"** (id `b211b53a…`, origin Romulus `76.100.245.192`) carries **web only**: `datakiin.com`, `play.datakiin.com`.
+- Cloudflare tunnel **"Datakiin"** (id `b211b53a…`, origin Romulus `<JON-WAN>`) carries **web only**: `datakiin.com`, `play.datakiin.com`.
 - Minecraft `survival.datakiin.com` is **NOT tunneled** — CNAME → `home.datakiin.com` → Comcast IP (Cloudflare-DDNS script), SRV `_minecraft._tcp` → port 25569, router port-forward. Live: v26.1.2 "Ridgehollow Survival".
 - The game door was already a direct port-forward + SRV, exactly because Cloudflare can't carry game packets. For the public build, swap that direct exposure for **the VPS relay** so the home IP isn't published to players. **This whole setup migrates off Romulus onto labserver** — see Scope.
 
@@ -741,7 +755,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 > | Value | Before (Comcast) | Now (Fios), measured 2026-09-01 |
 > |---|---|---|
-> | Public WAN | `73.132.162.205` | **`71.166.138.197`** (Verizon) |
+> | Public WAN | `<DANNY-WAN-COMCAST>` | **`<DANNY-WAN>`** (Verizon) |
 > | House gateway | `10.0.0.1` | **`192.168.1.1`** — read off the `ttl=2` hop, not guessed |
 > | labserver LAN | `192.168.50.10` | ✅ **unchanged** — the FortiGate survived the swap |
 > | Default route | `192.168.50.1` | ✅ **unchanged** |
@@ -794,7 +808,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 >    ✅ **TUNNEL UP 2026-09-02.** All four passes run; labserver's pubkey `TXj5F/zRUranFo6czqbE3RKmfUCw6Qn/hW8n9IIAKy0=`, VPS `10.10.0.1`, labserver `10.10.0.2`, handshake established both directions, **0% loss, RTT 5.98 ms**.
 >
->    🔥 **The design's central claim is now measured, not argued.** The VPS config has **no `Endpoint` line** for labserver — it learned the address from the first handshake and `wg show` on the VPS reports `endpoint: 71.166.138.197:57521`, Danny's Fios WAN. So the VPS can push traffic down a tunnel it did not open, with **no port-forward on the Fios router and no VIP or policy on the FortiGate.** That is what deletes every task that needed Danny at a console, and it is why the whole port-forward chain is obsolete rather than merely stale. The 5.98 ms also validates the `us-iad` choice empirically — it was picked on the argument that Danny is DC-metro.
+>    🔥 **The design's central claim is now measured, not argued.** The VPS config has **no `Endpoint` line** for labserver — it learned the address from the first handshake and `wg show` on the VPS reports `endpoint: <DANNY-WAN>:57521`, Danny's Fios WAN. So the VPS can push traffic down a tunnel it did not open, with **no port-forward on the Fios router and no VIP or policy on the FortiGate.** That is what deletes every task that needed Danny at a console, and it is why the whole port-forward chain is obsolete rather than merely stale. The 5.98 ms also validates the `us-iad` choice empirically — it was picked on the argument that Danny is DC-metro.
 >
 >    ✅ **Isolation re-tested immediately after, per the standing rule** — labserver → `192.168.1.1`: route exists via `192.168.50.1` (so traffic is *dropped by policy*, not merely unrouted), ICMP **100% loss**, TCP **80/443/53/22/8080 all blocked**, control `1.1.1.1` on 443 and 53 **reachable** so the test is valid. Karla's protection is untouched, as predicted — the tunnel opens nothing inbound at the perimeter.
 >
