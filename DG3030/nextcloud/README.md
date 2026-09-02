@@ -89,6 +89,45 @@ substitute for finding new music.
 is owned by `deks` and `jony` cannot write there. Music is small relative to
 video, so the 3.6 TB free is a non-issue.
 
+#### ✅ Ingest decided 2026-09-02 — Jose is REMOTE
+
+He is not on the house LAN, so **Samba is not available to him** and Nextcloud
+is his path. That is the whole reason this stack exists; Danny, who *is* on the
+LAN, should still be pointed at the Samba share instead.
+
+**Two different problems, two different answers:**
+
+| | Route | Why |
+|---|---|---|
+| **Initial bulk load** | 🚚 **Sneakernet — a USB drive** | Days of upload, and ~30% of a month's VPS transfer |
+| **Every addition after** | 🌐 **Nextcloud web UI** | Seconds to minutes; the network path is right for this |
+
+**The incremental case is a non-issue.** Ten songs is ~100 MB as MP3 320 or
+~350 MB as FLAC — under a minute to a few minutes on any normal upload, and
+0.035% of the monthly quota at worst. Nextcloud chunks and resumes, so a flaky
+link handles that size without trouble.
+
+⚠️ **Uploads consume the VPS transfer quota too, roughly 1:1 — this is not
+obvious.** Linode meters outbound only, so an upload *looks* free. But traffic
+passing through a relay leaves twice: it arrives from the contributor on `eth0`
+(free), then the VPS forwards it down the WireGuard tunnel to labserver, which
+**exits on `eth0` as encapsulated UDP and is metered**. The counters show this
+shape already (`eth0 rx 1.73 GB` vs `wg0 rx 1.65 GB`). Irrelevant for ten songs;
+decisive for a 300 GB library. **Confirm it empirically** with
+`vnstat -i eth0 -m` either side of a known-size upload before trusting the 1:1.
+
+🚚 **The open question on sneakernet is delivery.** "Carry a drive over" assumes
+physical proximity that a remote contributor does not have — the drive has to be
+mailed to Danny or wait for a visit. If neither is practical, uploading over the
+network is the fallback: budget days, and **split it across two billing months**
+rather than discovering Linode's overage rate the expensive way. (That rate is
+still unrecorded — see the VPS README.)
+
+⚠️ **Do not point the Nextcloud desktop sync client at the music folder.** Sync
+is bidirectional; he would pull the entire library back down. That is the same
+mirroring trap that got Syncthing rejected for this job. **Web UI upload only**
+for contributors.
+
 ### Naming, for the Movies library only
 
 Jellyfin matches on the folder and file name. This layout works:
