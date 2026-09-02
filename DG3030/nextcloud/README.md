@@ -1,4 +1,4 @@
-# `nextcloud/` — movie + home-video ingest
+# `nextcloud/` — movie, home-video + music ingest
 
 Authenticated upload point at **`cloud.datakiin.com`**. Contributors upload
 large files; they land directly in the folders Jellyfin scans.
@@ -14,20 +14,80 @@ upload is a single POST: if it dies three hours in, it starts over. Nextcloud
 chunks and resumes. That is the whole reason for the extra weight of a
 database and a Redis instance.
 
-## Two libraries, because the type decides the behaviour
+## Three libraries, because the type decides the behaviour
 
-Jellyfin's library **type** controls whether it scrapes metadata, so the two
+Jellyfin's library **type** controls whether it scrapes metadata, so the three
 kinds of content cannot share a folder.
 
 | Folder | Jellyfin library type | For |
 |---|---|---|
 | `/srv/datakiin/data/media/movies` | **Movies** | Commercial films — gets posters, cast, synopsis from TMDB |
 | `/srv/datakiin/data/media/home-videos` | **Home Videos & Photos** | Family footage — no scraping, no failed matches |
+| `/srv/datakiin/data/media/music` | **Music** | 🆕 Jose's collection — see below |
 
 Put family footage in a Movies library and Jellyfin tries to match
 `Christmas 2004.mkv` against TMDB, fails, and displays it as an unidentified
 mess. Put a real film in a Home Videos library and you get no poster, no
 synopsis, no metadata at all.
+
+### 🎵 Music — added 2026-09-02
+
+**The requirement:** Jose wants to replace Spotify with music he already
+owns. That is a different shape of problem from the video libraries and it
+changes several assumptions.
+
+**Music is effectively free on the VPS link.** This is the one library that
+costs nothing to worry about:
+
+| Content | Rate | GB/hour | Hours per 1 TB |
+|---|---|---|---|
+| MP3 320 kbps | 0.32 Mbps | 0.14 | **~7,100** |
+| FLAC (lossless) | ~1 Mbps | 0.45 | **~2,200** |
+| *(1080p video, for contrast)* | *8 Mbps* | *3.6* | *277* |
+
+Four hours a day of FLAC, every day, is about **54 GB/month** — roughly 5% of
+the quota. Video is the only thing that can exhaust the transfer allowance;
+music never will.
+
+**Audio transcoding uses the CPU, never NVENC.** The measured 8-session cap is
+video-only, so music cannot compete with anyone watching a film. The i7
+handles audio transcodes without noticing. And the recommended 10–12 Mbps
+remote bitrate cap sits ~10× above any audio bitrate, so **one policy covers
+both** — no separate music tier is needed.
+
+**⚠️ Tags matter more than filenames here, unlike the video libraries.**
+Jellyfin parses the *path* for films but reads embedded **ID3 / Vorbis tags**
+for music. A collection accumulated over years will have uneven tagging, and
+that — not the folder layout — decides whether the result looks like Spotify
+or like a junk drawer. Run it through **MusicBrainz Picard** *before* import;
+fixing it afterwards means re-scanning the library.
+
+Folder layout that Jellyfin expects:
+
+```
+music/
+  Artist Name/
+    Album Name (Year)/
+      01 Track Title.flac
+```
+
+**📱 Use Finamp, not the Jellyfin app.** The main Jellyfin client is built
+around video and is poor for music. Finamp (iOS/Android) is a dedicated
+Jellyfin music client with proper queues, playlists and album browsing.
+
+🎯 **Finamp's offline downloads are the real bandwidth lever.** An album
+downloaded once over Wi-Fi plays all month for zero further transfer, which
+turns even the heaviest music user into a rounding error against the quota.
+
+**⚠️ Set expectations: this replaces Spotify's library, not its discovery.**
+No algorithmic recommendations, no Discover Weekly, no new releases he does
+not already own. Jellyfin offers playlists and an "Instant Mix" shuffle and
+little else. A straight upgrade for replaying an owned collection — no
+substitute for finding new music.
+
+**Storage goes on `/srv/datakiin`**, same as the other two, because `/mnt/media`
+is owned by `deks` and `jony` cannot write there. Music is small relative to
+video, so the 3.6 TB free is a non-issue.
 
 ### Naming, for the Movies library only
 
@@ -55,7 +115,7 @@ Home videos need none of this. Any filename works.
 ## Prepare the host first
 
 ```bash
-sudo mkdir -p /srv/datakiin/data/media/{movies,home-videos}
+sudo mkdir -p /srv/datakiin/data/media/{movies,home-videos,music}
 sudo mkdir -p /srv/datakiin/data/nextcloud/{html,db}
 
 # Owner jony, group www-data(33) so BOTH can write; setgid so new files
@@ -114,9 +174,10 @@ Nextcloud's internal store, or Jellyfin will never see them.
 
 1. Sign in as admin → *Apps* → enable **External storage support**
    (`files_external`, bundled).
-2. *Administration settings* → *External storage* → add two mounts:
+2. *Administration settings* → *External storage* → add three mounts:
    - `Movies` → Local → `/media/movies`
    - `Home Videos` → Local → `/media/home-videos`
+   - `Music` → Local → `/media/music`
    - Available for: the group you give contributors
 3. Upload a test file, then confirm it exists on the host:
 
