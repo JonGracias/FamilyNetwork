@@ -1,6 +1,6 @@
-# watch-remoria-disk.ps1 — runs ON ROMULUS (scheduled weekly): polls Remoria's
+# watch-remus-disk.ps1 — runs ON ROMULUS (scheduled weekly): polls Remus's
 # D: Seagate over SSH for the UDMA CRC counter (SMART 199) and last-7-days
-# Event 153 / dirty-boot counts. Appends to logs\remoria-disk-watch.csv and
+# Event 153 / dirty-boot counts. Appends to logs\remus-disk-watch.csv and
 # writes an ALERT file to the desktop if CRC climbs above the previous reading
 # (post-SATA-fix baseline: 2,336 on 2026-07-28).
 $ErrorActionPreference = 'Stop'
@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logDir = Join-Path $repo 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory $logDir | Out-Null }
-$csv = Join-Path $logDir 'remoria-disk-watch.csv'
+$csv = Join-Path $logDir 'remus-disk-watch.csv'
 if (-not (Test-Path $csv)) { Set-Content $csv 'date,crc199,event153_7d,dirtyBoots_7d' }
 
 $remote = @'
@@ -24,7 +24,7 @@ $e41  = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Micros
 "$crc,$e153,$e41"
 '@
 $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
-$out = ssh -o ConnectTimeout=15 -o BatchMode=yes remoria "powershell -NoProfile -EncodedCommand $b64" 2>$null |
+$out = ssh -o ConnectTimeout=15 -o BatchMode=yes remus "powershell -NoProfile -EncodedCommand $b64" 2>$null |
        Where-Object { $_ -match '^\d+,\d+,\d+$' } | Select-Object -First 1
 
 $today = Get-Date -Format 'yyyy-MM-dd'
@@ -38,11 +38,11 @@ Add-Content $csv "$today,$out"
 
 $crcNow = [uint64]($out -split ',')[0]
 if ($prev -and $crcNow -gt [uint64]$prev) {
-    $alert = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ALERT-remoria-disk.txt'
+    $alert = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ALERT-remus-disk.txt'
     @(
-        "Remoria D: (Seagate ST2000DM008) CRC errors are climbing again."
+        "Remus D: (Seagate ST2000DM008) CRC errors are climbing again."
         "Previous: $prev   Now: $crcNow   ($today)"
         "The SATA cable/connector problem is NOT fixed. Details: $csv"
-        "Full picture: run diag-disk.ps1 on Remoria (see FamilyNetwork README)."
+        "Full picture: run diag-disk.ps1 on Remus (see FamilyNetwork README)."
     ) | Set-Content $alert
 }

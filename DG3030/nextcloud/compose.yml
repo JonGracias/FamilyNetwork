@@ -1,0 +1,106 @@
+# Nextcloud -- the family-movie ingest point.
+#
+# WHY THIS EXISTS: several people (Jon, Jose, later others) need to upload
+# multi-GB home movies over residential upload links. That rules out a plain
+# HTML form upload -- a single POST that dies four hours in has to start over.
+# Nextcloud chunks uploads and resumes them, which is the entire reason it is
+# here rather than something lighter.
+#
+# Danny does NOT use this. He is on the LAN behind the FortiGate and already
+# has a writable Samba share at \\labserver\Media -- gigabit, no size limit,
+# no proxy in the path. Do not migrate him onto this; it would be strictly
+# worse for him.
+
+services:
+  app:
+    image: nextcloud:30-apache
+    container_name: nextcloud
+    restart: unless-stopped
+    depends_on: [db, redis]
+    # NO "ports:" -- deliberately. This publishes nothing on the host. Caddy
+    # reaches it by container name over the shared "edge" network, so there is
+    # no host socket to accidentally expose and no ufw rule to get wrong.
+    # (Docker DNATs published ports around ufw; the safest published port is
+    # the one that does not exist.)
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      REDIS_HOST: redis
+
+      NEXTCLOUD_ADMIN_USER: ${NC_ADMIN_USER:?set NC_ADMIN_USER in .env}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD:?set NC_ADMIN_PASSWORD in .env}
+      NEXTCLOUD_TRUSTED_DOMAINS: "cloud.datakiin.com"
+
+      # ---- Behind a reverse proxy. All three of these matter. ----
+      # Without TRUSTED_PROXIES, Nextcloud sees Caddy's address as the client
+      # for EVERY request. Consequences are quiet and bad: brute-force
+      # protection counts all failed logins against one IP and eventually
+      # locks out the whole internet, rate limits misfire, and the audit log
+      # records a single useless address. Same failure already documented for
+      # Jellyfin's "Known proxies" -- any service put behind a proxy inherits
+      # it.
+      #
+      # 172.20.0.0/16 is the "edge" bridge. Re-check this if edge is ever
+      # recreated on a different subnet.
+      TRUSTED_PROXIES: "172.20.0.0/16"
+      # TLS ends at Caddy, so the app only ever sees plain HTTP and would
+      # otherwise generate http:// URLs -- which breaks the mobile clients
+      # and every share link.
+      OVERWRITEPROTOCOL: https
+      OVERWRITECLIURL: "https://cloud.datakiin.com"
+
+      # ---- Large uploads ----
+      # Nextcloud's web UI chunks uploads, so these are a backstop rather than
+      # the mechanism -- but desktop/mobile clients and WebDAV can send whole
+      # files, and those hit the PHP limits directly.
+      PHP_UPLOAD_LIMIT: 16G
+      PHP_MEMORY_LIMIT: 1G
+    volumes:
+      - /srv/datakiin/data/nextcloud/html:/var/www/html
+      # The whole media tree, bind-mounted straight in. Wire the two
+      # subfolders up as separate External Storage (Local) mounts inside
+      # Nextcloud so uploads land as real files with real names -- NOT in
+      # Nextcloud's internal object store, where Jellyfin would never find
+      # them. See README.
+      #
+      #   /media/movies       -> Jellyfin library type "Movies"
+      #   /media/home-videos  -> Jellyfin library type "Home Videos & Photos"
+      #
+      # They are separate because the library TYPE differs, and the type
+      # decides whether Jellyfin scrapes metadata. Mixing them in one folder
+      # forces one wrong answer for half the content.
+      - /srv/datakiin/data/media:/media
+    networks: [edge, ncnet]
+
+  db:
+    image: postgres:16-alpine
+    container_name: nextcloud-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - /srv/datakiin/data/nextcloud/db:/var/lib/postgresql/data
+    # Only on the private network -- never on edge, never published.
+    networks: [ncnet]
+
+  redis:
+    image: redis:7-alpine
+    container_name: nextcloud-redis
+    restart: unless-stopped
+    # Redis provides transactional file locking. Without it Nextcloud falls
+    # back to database locking, which under big concurrent uploads produces
+    # spurious "file is locked" errors -- exactly the workload this stack is
+    # for, so it is not optional here.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [ncnet]
+
+networks:
+  edge:
+    name: edge
+    external: true
+  ncnet:
+    driver: bridge

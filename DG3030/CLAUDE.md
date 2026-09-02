@@ -21,6 +21,7 @@ Same hat as FamilyNetwork: a seasoned IT technician (CompTIA A+/Network+), **dia
 | Romulus   | `100.118.236.2` (TS) | Jon's house | Admin workstation → **dev machine only** going forward. Tailscale as `jon.gracias@`. Holds SSH keypair `jon@romulus`. |
 | labserver | **`100.86.218.41` (TS)** · LAN `192.168.50.10` | **Danny's house** | **The workhorse.** Debian 13 (trixie). ASUS PRIME Z490-A, **i7-10700 (8C/16T)**, **62 GB RAM** + 49 GB swap, **RTX 3060 12 GB**. ~3.7 TB free. Owned by `DG3030@`, FQDN `labserver.tail663992.ts.net`. Runs **Jellyfin** (8096) + **Samba**. Login `jony`, key auth, password-required sudo. |
 | FortiGate 40F | `192.168.50.1` | Danny's house | 🆕 **The gate.** Installed by Danny 2026-08-13. 5× GbE, no Wi-Fi radio. labserver now sits behind it, isolated from the house LAN. |
+| **datakiin-relay** | **`172.233.207.73`** · tunnel `10.10.0.1` | Linode `us-iad` | 🆕 **The public door.** Rented 2026-09-02. Nanode 1 GB, Debian 13, $5/mo. Stateless relay — **terminates no TLS, holds no cert, stores no data.** SSH alias `vps`, root + key only. Rebuildable from [`vps/setup-vps.sh`](vps/setup-vps.sh). |
 | Ryzen mini (K11) | — | — | ❌ **SCRAPPED.** labserver's 62 GB RAM + RTX 3060 host everything. Not needed, not planned. |
 | Storage | on labserver | Danny's house | **Nothing to buy** — ~3.7 TB free across 3× NVMe + a 2 TB HDD, plus Jon's dedicated 4 TB at `/srv/datakiin`. |
 
@@ -42,9 +43,21 @@ Same hat as FamilyNetwork: a seasoned IT technician (CompTIA A+/Network+), **dia
 
 She is right to ask. **We are deliberately turning labserver into an internet-facing machine**, which raises the odds it is eventually compromised (a Minecraft plugin RCE, an exposed model API, a stale container). Until 2026-08-13 that box sat on the **same Ethernet segment as her work machine** — its own ARP cache held a house machine's MAC. An internet-facing host on a flat home LAN is the textbook pivot.
 
-> 🔴 **STALE AS OF 2026-08-29 — Danny's house moved to Verizon Fios, so the `10.0.0.0/24` house LAN this section measures against NO LONGER EXISTS.** The method below is right and the result was true when taken; the *address* it tested is gone. **Karla's isolation must be treated as UNVERIFIED until re-measured against the new Fios house subnet.**
+> ✅ **RE-VERIFIED 2026-09-01 against the new Fios subnet — isolation HOLDS, and we now know why.** The 🔴 STALE warning that stood here (raised 2026-08-29, when the ISP swap deleted the `10.0.0.0/24` this section measures against) is resolved. The method below was always right; only the address moved.
 >
-> The specific risk: **if the FortiGate's deny policy was written against a `10.0.0.0/24` address object, it now matches nothing** — the identical failure mode as the ufw rules that sat pointing at a subnet this box had already left, documented twice in this file. If the policy was written interface-to-interface, it still holds. **We do not know which, and the difference is Karla's protection.** Re-derive the new house gateway from labserver (`ttl=2` hop toward `1.1.1.1`) and re-run the ICMP **and** TCP probe against *that* address before anyone calls this solved again.
+> **New house gateway derived, not guessed** — TTL-limited probe from labserver toward `1.1.1.1`: `ttl=1` → `192.168.50.1` (the FortiGate), **`ttl=2` → `192.168.1.1`** (the Fios router), `ttl=3` → `169.254.3.1`, `ttl=4` → `100.41.33.70` (Verizon). The double-NAT topology survived the swap.
+>
+> | Probe against `192.168.1.1` | Result |
+> |---|---|
+> | `ip route get` | route **exists** via `192.168.50.1` → traffic is **dropped by policy**, not merely unrouted |
+> | ICMP ×3 | **100% packet loss** |
+> | TCP 80 / 443 / 53 / 22 / 8080 | **all blocked** |
+> | sweep of other `192.168.1.x` hosts | nothing answered |
+> | **control** `1.1.1.1:443` and `:53` | **reachable** — so the test is valid, not a general outage |
+>
+> 🎯 **This answers the question the warning posed.** The FortiGate deny was **not** written against a `10.0.0.0/24` address object — it is blocking a subnet that *did not exist when the policy was authored*, so it must be interface- or zone-based. Had it been address-object based, Karla's protection would have silently become a no-op behind a green UI.
+>
+> ⚠️ **Do not read that as vindication.** We did not design it that way and could not have said which it was; the good outcome was Danny's config choice, not our control. **Still ask him to confirm the policy is interface-to-interface**, so the next upstream change is a non-event rather than another unverified period.
 
 ### ✅ SOLVED AND VERIFIED 2026-08-13 — the FortiGate is in
 
@@ -178,8 +191,9 @@ The shift to internalize: **we traded "network membership = auth" for "real appl
 |---|---|---|---|
 | `play.datakiin.com` — install scripts, portfolio | HTTP | **Cloudflare Tunnel** | none needed (public by design) |
 | **Minecraft** instances | raw TCP + UDP (voice) | **a VPS we rent** — WireGuard back to labserver, mc-router on the VPS | game-level |
-| **Jellyfin** + phone/TV apps | HTTP, heavy video | **Caddy on labserver** + forwarded 443 | Jellyfin accounts |
-| **Immich, Nextcloud** | HTTP | same Caddy | app accounts |
+| **Jellyfin** + phone/TV apps | HTTP, heavy video | 🔄 **VPS relay → Caddy on labserver** (was: forwarded 443) | Jellyfin accounts |
+| **Nextcloud** — movie + home-video ingest | HTTP, large uploads | 🔄 **VPS relay → same Caddy** | Nextcloud accounts |
+| **Immich** | HTTP | same Caddy | app accounts |
 | **odin / Ollama** | HTTP API | Caddy **with auth in front** | ❗ Ollama has **none** — blocker |
 | **Admin (Jon's SSH)** | SSH | **Tailscale** — no public port 22 | SSH keys |
 
@@ -191,6 +205,13 @@ The shift to internalize: **we traded "network membership = auth" for "real appl
 2. **Ollama has no authentication of any kind.** Exposing `odin` as-is hands the world a free GPU *and* an API that can pull and **delete** models. It must sit behind something that authenticates — Caddy basic auth, Open WebUI accounts, or Cloudflare Access. Rate-limit it. This is why the current `0.0.0.0` bind must be fixed **before** anything public ships.
 
 ## The front door — Caddy, no VPS for the web door (decided 2026-08-13)
+
+> 📌 **PARTIALLY REVERSED 2026-09-01 — the media door moves onto the VPS too.** This heading has now been narrowed twice: first on 2026-08-27 (games), now again for **Jellyfin and Nextcloud**. What survives unchanged is **websites**, which stay on the Cloudflare Tunnel for a reason this section never weighed: the tunnel is free, absorbs DDoS, and costs the VPS no bandwidth.
+>
+> **The reversal is not about anonymity** — the "hide the IP only from hostile audiences" argument below is still correct and still says family video does not need hiding. It is about **dependency**: every remaining task on the media door needed Danny at a console on a brand-new Fios router, and the VPS deletes all of them at once. Cost was never the deciding factor either way; ~€4/mo was already committed for games.
+>
+> ⚠️ **One boundary this creates:** Cloudflare **terminates TLS at its edge and can read anything crossing the tunnel.** Fine for `lab.datakiin.com` (public static content); disqualifying for Nextcloud or Jellyfin. That is now a *second, independent* reason those stay off the tunnel, alongside the video terms-of-service issue.
+
 
 ### Why no VPS *for the web and media doors*
 
@@ -221,7 +242,7 @@ The tempting split — "Caddy for the easy things, nginx for Jellyfin" — is ba
 **The feature that decides it:** DNS-01 wildcard issuance via the **Cloudflare API** — DNS is already there, so `*.datakiin.com` needs **no port 80 hole**, and adding a service is three lines with zero certificate work:
 
 ```caddy
-jellyfin.datakiin.com {
+watch.datakiin.com {
     reverse_proxy 127.0.0.1:8096
 }
 ```
@@ -245,13 +266,13 @@ The stack lives in [`caddy/`](caddy/) (Dockerfile · compose.yml · Caddyfile ·
 | Cert issuer | **`C=US, O=Let's Encrypt, CN=YE1`** — *not* the internal self-signed fallback |
 | Chain | leaf → LE `YE1` → `ISRG Root YE` → `ISRG Root X2` → `ISRG Root X1` |
 | Validity | `notBefore Aug 14 12:38:43 2026` · `notAfter Nov 12 2026` |
-| SAN | `DNS:jellyfin.datakiin.com` |
+| SAN | `DNS:watch.datakiin.com` |
 | **Trust-store validation** | ✅ `curl` **without `-k`** → `ssl_verify_result=0` |
 | Proxy → Jellyfin | **HTTP 200**, `via: 1.1 Caddy`, `server: Kestrel`, Jellyfin **10.11.11** JSON |
 | Unknown SNI | connection closed — **no default site**, nothing served by accident |
 | Isolation after deploy | ✅ `10.0.0.1` still blocked on **80 and 443**; `1.1.1.1:443` fine |
 
-✅ **DNS-01 worked with no A record in existence.** `jellyfin.datakiin.com` is **NXDOMAIN in public DNS** and the cert issued anyway — because DNS-01 only requires the API to create and remove a `_acme-challenge.jellyfin` TXT record. Issuance never needs the hostname to resolve, and never needs port 80. That is the whole argument for DNS-01 demonstrating itself.
+✅ **DNS-01 worked with no A record in existence.** `watch.datakiin.com` is **NXDOMAIN in public DNS** and the cert issued anyway — because DNS-01 only requires the API to create and remove a `_acme-challenge.jellyfin` TXT record. Issuance never needs the hostname to resolve, and never needs port 80. That is the whole argument for DNS-01 demonstrating itself.
 
 ⚠️ **`reverse_proxy host.docker.internal:8096`, not `127.0.0.1:8096`.** Inside a container `127.0.0.1` is the *container's own* loopback — it would never reach Danny's native Jellyfin. `extra_hosts: host.docker.internal:host-gateway` maps to the `edge` bridge gateway **`172.20.0.1`**, and Jellyfin's own reply confirms the path: `"LocalAddress":"http://172.20.0.1:8096"`. The generic three-line snippet earlier in this document assumes a containerised backend; **a host-native backend needs the host-gateway form.**
 
@@ -260,7 +281,7 @@ The stack lives in [`caddy/`](caddy/) (Dockerfile · compose.yml · Caddyfile ·
 The Caddy log contains exactly **one** 502 and **one** `i/o timeout` across the container's whole life:
 
 ```
-13:37:13  certificate obtained successfully   jellyfin.datakiin.com
+13:37:13  certificate obtained successfully   watch.datakiin.com
 13:39:56  dial tcp 172.17.0.1:8096: i/o timeout   status 502   duration 3.00s
 ```
 
@@ -311,6 +332,33 @@ sudo ufw allow from 172.20.0.0/24 to any port 8096 proto tcp comment 'Caddy cont
 
 ⚠️ **This whole path becomes load-bearing the moment Jellyfin is rebound off `0.0.0.0`** (see the Jellyfin bind note above). Today it survives partly because Jellyfin listens on every interface.
 
+### 🔴 INCIDENT 2026-09-01 — Caddy came back from the reboot with no network at all
+
+After the Fios-swap power-off, labserver booted 08:29 and Caddy's container started with it — and served nothing. `192.168.50.10:443` refused, and the log filled with ACME failures reading `lookup acme-v02.api.letsencrypt.org on [::1]:53: connection refused`, every 10 minutes.
+
+**Root cause, measured:** the container had **no network interface but loopback**.
+
+```
+/proc/<caddy>/net/dev  ->  lo          (nginx and cloudflared both had lo + eth0)
+```
+
+No `eth0`, no route, no `172.20.0.x` address: it never joined the `edge` bridge. Every symptom follows from that one fact — a container with no endpoint cannot have a published port, cannot be reached at any bridge address, and cannot resolve DNS, so its resolver falls back to `::1:53` where nothing listens. Caddy itself was healthy and still holding a valid cert; it was listening on `[::]:443` inside a namespace nothing could route to.
+
+**Fix — recreate, do not restart.** `docker restart` reuses the existing (broken) network config and comes back identical:
+
+```bash
+cd /srv/datakiin/stacks/caddy && sudo docker compose up -d --force-recreate
+```
+
+✅ **Verified after the fix:** container has `lo + eth0`; host shows `192.168.50.10:443` on **TCP and UDP** (the HTTP/3 socket is back); and from **Romulus**, through an SSH tunnel so the handshake terminated on Windows against its own certificate store — `http=200`, `ssl_verify_result=0`, issuer `C=US, O=Let's Encrypt, CN=YE1`, valid to 12 Nov 2026.
+
+⚠️ **Two diagnostic errors were made getting here, both worth keeping:**
+
+1. **Read `/proc/PID/net/tcp` only, and concluded "Caddy is serving no sites."** That file is **IPv4 only**. A Go server binding `:443` creates a dual-stack socket that appears *exclusively* in `net/tcp6`. The real listener list was there the whole time. **Check both files, or you will confidently declare a listening service dead.**
+2. **Used `strtonum()` in an awk one-liner.** That is a **gawk** extension; Debian ships **mawk**, which errors out and prints nothing — which read as "the state changed" rather than "my parser broke." A second, differently-written probe minutes earlier had worked. **When output changes and the system did not, suspect the tool.**
+
+Also disproved: the first hypothesis was a DHCP race — Docker binding `192.168.50.10:443` before the interface had its address. Plausible, wrong, and it survived only until the logs were read. **The logs named the actual failure in their first line.**
+
 ### 📋 ufw rules observed 2026-08-14 that are NOT in the documented six
 
 `ufw status verbose` shows three additions beyond the post-FortiGate allow-list recorded above. Noting them so the next reader is not confused by the mismatch — **neither was added by this work**:
@@ -325,9 +373,12 @@ sudo ufw allow from 172.20.0.0/24 to any port 8096 proto tcp comment 'Caddy cont
 
 ### The two steps still needed to make it public
 
+> 📕 **OBSOLETE 2026-09-01.** Both steps below assumed traffic arrives through Danny's router. Under the VPS design it does not: there is **no port-forward, no VIP, no FortiGate policy**, and the DNS record points at the VPS rather than a house IP that needs DDNS. Kept for the reasoning, not as work to do. The live plan is in the Status section.
+
+
 Everything on the labserver side is done. Until both of these land, the door is reachable **only from labserver's own LAN segment** — where it is verified working end-to-end with a publicly-trusted cert. Neither is a failure of this build.
 
-#### Step 1 — DNS: `jellyfin.datakiin.com` (Jon, Cloudflare dashboard, 2 minutes)
+#### Step 1 — DNS: `watch.datakiin.com` (Jon, Cloudflare dashboard, 2 minutes)
 
 The name is **NXDOMAIN** today — confirmed from both Romulus and labserver, with `lab.datakiin.com` as a working control.
 
@@ -356,7 +407,7 @@ Accepted by design: this record **publishes Danny's home IP**. That is the trade
 
 #### Step 2 — The port-forward chain (needs Danny: router + FortiGate)
 
-📗 **Full step-by-step: [`RUNBOOK-port-forward.md`](RUNBOOK-port-forward.md)** — field-by-field values, failure-symptom table, verification that works before DNS exists, and a rollback. The summary below is the shape; the runbook is what to actually follow.
+📕 **The step-by-step that lived here (`RUNBOOK-port-forward.md`) was DELETED 2026-09-02** — the VPS design removed this whole chain. Kept below only as the reasoning behind a path not taken.
 
 ```
 internet → Comcast router 10.0.0.1 → [forward 443] → FortiGate WAN
@@ -409,9 +460,9 @@ Spend the free IP-hiding where the hostile audience actually is.
 - **No inbound rule anywhere** — no port-forward on Comcast's router, no VIP or policy on the FortiGate, for game traffic. NAT only blocks connections nobody asked for, and labserver asked for this one. Same property that already makes Tailscale and `lab.datakiin.com` work from inside the DMZ; **double NAT stops being a problem to solve.**
 - **Karla's isolation is unaffected and arguably better**, because the game door stops requiring a hole at the perimeter at all.
 
-🚧 **Status: decided, not yet built.** No provider chosen (Hetzner was discussed as a likely fit at ~€4/mo; **not** a decision), no address, no timeline. 🔗 The Minecraft-side detail — mc-router, `voice_host`, the per-world SRV records — lives in [`MinecraftServers/CLAUDE.md`](../../MinecraftServers/CLAUDE.md); that document is the authority on the game specifics, this one on the household network.
+✅ **Status 2026-09-02: the VPS and the tunnel are BUILT** — Linode Nanode 1 GB at `172.233.207.73` (`us-iad`, $5/mo), WireGuard up at `10.10.0.1` ↔ `10.10.0.2`. **What is not built is the game half:** mc-router is not installed, and `25565/tcp` + the `24454-24473/udp` voice range are deliberately **not open** in the Cloud Firewall. The relay currently carries HTTPS only. *(Superseded note: "decided, not yet built; Hetzner discussed at ~€4/mo, not a decision" — Hetzner was dropped, see the Cost section.)* 🔗 The Minecraft-side detail — mc-router, `voice_host`, the per-world SRV records — lives in [`MinecraftServers/CLAUDE.md`](../../MinecraftServers/CLAUDE.md); that document is the authority on the game specifics, this one on the household network.
 
-### What publishing `jellyfin.datakiin.com` does and does not expose
+### What publishing `watch.datakiin.com` does and does not expose
 
 Precise, because these two risks get conflated constantly.
 
@@ -457,7 +508,7 @@ Three goals, not two:
 
 **Jon pays for everything** (confirmed 2026-08-13), which makes "cheap" a real constraint rather than a preference.
 
-- **~$4–5/mo recurring** — the game-door VPS, and nothing else. 📌 **Revised 2026-08-27**; this line read **$0/mo** while the game door was playit.gg's free tier. See "The game door" for why that stopped fitting.
+- **$5/mo recurring** — the VPS, and nothing else. ✅ **Confirmed 2026-09-02** off Linode's own order page (Nanode 1 GB, `us-iad`, $0.0075/hr, 1 TB transfer) rather than from memory — the first price figure in this project that was *read*, and the `~$5` estimate turned out to be right. 📌 **Revised 2026-08-27**; this line read **$0/mo** while the game door was playit.gg's free tier, then **~$4–5/mo** as an estimate. See "The game door" for why the free tier stopped fitting.
 - **$0/mo for the web and media doors** — Caddy + port-forward + Let's Encrypt, and the Cloudflare Tunnel free tier. Those still need no VPS.
 - **$0 one-time** — the FortiGate 40F was already owned. The ~$30 OpenWrt router considered earlier is **cancelled**.
 - Plus electricity and a little Claude API.
@@ -499,28 +550,39 @@ Kubernetes is a *cluster* orchestrator — scheduling across nodes, failover, dr
 
 - **Machine:** ASUS PRIME Z490-A, bare metal. **i7-10700** (8C/16T, 4.8 GHz), **62 GiB RAM**, 49 GiB swap. Debian 13 / kernel 6.12.
 - **GPU:** **NVIDIA RTX 3060 12 GB (GA106, Ampere)** — installed 2026-08-11. ✅ Proprietary driver 550.163.01 + CUDA 12.4 (nouveau blacklisted and baked into initramfs, DKMS `nvidia-current`, `nvidia-smi` shows 12288 MiB). Tensor cores + 12 GB → 13B-class quantized models fully on-GPU. Install path: enable `non-free` apt component (was missing) → `apt install linux-headers-amd64 nvidia-driver` → reboot. Secure Boot off, no MOK signing needed.
-- **Storage (~3.7 TB free):**
-  - `nvme0n1` SK hynix PC611 1 TB → `/` (889 G, **833 G free**) + EFI + 49 G swap
-  - `nvme1n1` Kingston 1 TB → `/mnt/media` (916 G, 55 G used — **815 G free**, Jellyfin lib)
-  - `nvme2n1` Crucial P3 500 GB → `/mnt/backup` (458 G, ~empty)
+- **Storage (~5.6 TB free) — ✅ re-measured 2026-09-02:**
+  - `nvme0n1p2` SK hynix PC611 1 TB → `/` (889 G, **827 G free**) + EFI + 49 G swap
+  - **`nvme2n1p1`** Kingston 1 TB → `/mnt/media` (916 G, 55 G used — **815 G free**, Jellyfin lib)
+  - **`nvme1n1p2`** Crucial P3 500 GB → `/mnt/backup` (458 G, **435 G free**, ~empty)
+  - ⚠️ **The `nvme1n1` / `nvme2n1` names SWAPPED between 2026-08-11 and 2026-09-02.** The 1 TB Kingston is now `nvme2n1` and the 500 GB Crucial is now `nvme1n1` — the reverse of what this document recorded. **Nothing moved physically; NVMe enumeration order is not stable across reboots.** The mount points are correct because `/etc/fstab` keys on UUID. Same lesson as `HostName` names in `~/.ssh/config` and the interface-name rule for Samba: **never key anything on `/dev/nvmeXn1`** — a script that did would now be writing to the wrong disk.
   - `sda` Seagate ST2000LM007 2 TB HDD → ext4 label `archive` at `/srv/archive` (was `/mnt/storage2`; changed by someone other than us — open item (d))
   - `sdb1` Seagate ST4000NM0085 4 TB → `/srv/datakiin` (see Jon's environment)
+- **Network — ✅ re-measured 2026-09-01, post-Fios.** LAN address, gateway and tailnet address all **unchanged** by the ISP swap. New public WAN **`71.166.138.197`** (Verizon; the Comcast `73.132.162.205` is gone), new house gateway **`192.168.1.1`**. **`enp2s0f0` negotiates 1000 Mb/s — the GbE cap is confirmed, not assumed**, so labserver's segment can never see the 5 Gig no matter what the ONT delivers.
 - **Network (as of 2026-08-13, post-FortiGate):**
   - `enp2s0f0` UP at **`192.168.50.10/24`**, gw **`192.168.50.1`** (FortiGate). Public IPv6 **no longer present** — link-local only.
   - `tailscale0` **`100.86.218.41/32`** — **the stable address. Always use this.** The LAN address has now moved twice (`.40` → `.41` → `192.168.50.10`); never hard-code it.
   - 📌 **Correction:** an annotation in the previous draft asked whether `192.168.50.x` was "the tailscale IP" and answered yes. **It is not.** Tailscale uses `100.64.0.0/10`; `192.168.50.0/24` is the **FortiGate's LAN subnet**. The stray `192.168.50.0:68` dhcpcd socket seen on 2026-08-10 was foreshadowing this subnet before it existed.
   - Second NIC `enp2s0f1` + `enp6s0` present but DOWN.
-- **Already running:** `jellyfin.service` (8096), Samba (`smbd`/`nmbd`/`winbind`, 445/139/137/138), `smartmontools`, `unattended-upgrades`, sshd, tailscaled. **Plus (2026-08-14): Docker, cloudflared + the `web` static site, and `caddy` on `192.168.50.10:443`.**
+- **Already running — ✅ verified active 2026-09-02:** `jellyfin.service` (8096), Samba (`smbd`/`nmbd`/`winbind`, 445/139/137/138), `smartmontools`, `unattended-upgrades`, sshd, tailscaled, Docker, **`wg-quick@wg0`** (the VPS tunnel), cloudflared + the `web` static site, and **`caddy` on `192.168.50.10:443` + `10.10.0.2:443`**. Plus Danny's Apache (`*:80`, `127.0.0.1:8090`). Kernel `6.12.107+deb13-amd64`.
 - **NOT installed:** Podman, Java, `nvidia-container-toolkit`. *(Docker, cloudflared and Caddy were all on this list until 2026-08-13/14 — they are installed now.)*
-- **Listening sockets as of 2026-08-14** (`ss -tln`, the only authority — see the lesson about trusting docs):
+- ⚠️ **Changes made by Danny, found 2026-09-01 (not ours, not requested):** **Apache 2.4.68** installed and listening on **`*:80`** (Debian default page; wildcard bind, so it answers from every tailnet node — ufw does not gate `tailscale0`) plus `127.0.0.1:8090` serving a directory index; **`tailscale serve`** publishing that index at `https://labserver.tail663992.ts.net` (✅ **Funnel is OFF** — tailnet-only, not public); and the host `/etc/resolv.conf` now points at **Tailscale MagicDNS** (`100.100.100.100`, `search tail663992.ts.net`). None of it breaks anything — container DNS still works, since cloudflared resolves fine through the same inherited config. Recorded so the next reader is not confused by sockets this document never mentioned.
+- **Listening sockets — ✅ RE-READ 2026-09-02** (`ss -tln`, the only authority — see the lesson about trusting docs). This is the complete current list, not a selection:
 
   | Socket | Service | Reachable from tailnet? |
   |---|---|---|
-  | `192.168.50.10:443` tcp+udp | **Caddy** (container) | ❌ no — LAN-bound by design, verified refused from Romulus |
+  | `192.168.50.10:443` **tcp only** | **Caddy** (container) — house door | ❌ no — LAN-bound by design |
+  | **`10.10.0.2:443`** tcp | **Caddy — the public door**, via the WireGuard tunnel from the VPS | ❌ no — tunnel-bound |
+  | `100.86.218.41:443` + `[fd7a:115c:a1e0::4b01:dabb]:443` | **`tailscale serve`** (Danny's Apache index) — *not* Caddy | ✅ yes, tailnet only (Funnel off) |
+  | `*:80` | **Apache** (Danny's, Debian default page) | ⚠️ yes — wildcard bind |
+  | `127.0.0.1:8090` | Apache directory index (Danny's) | ❌ no |
   | `127.0.0.1:11434` | Ollama | ❌ no — fixed 2026-08-13 |
   | `0.0.0.0:22` | sshd | ✅ yes (intended — the admin plane) |
   | `0.0.0.0:8096` | Jellyfin (native) | ⚠️ **yes** — pre-existing wildcard bind, see below |
   | `0.0.0.0:445` / `:139` | Samba | ⚠️ yes — Danny's service, propose don't edit |
+
+  ⚠️ **No UDP 443 any more.** The 2026-08-14 table listed `192.168.50.10:443` as *tcp+udp*; HTTP/3 was turned off during the VPS cutover (`protocols h1 h2`) because nginx's stream module cannot relay QUIC and `443/udp` is closed at the Linode Cloud Firewall. The UDP publish was removed from `compose.yml` to match, rather than leaving a socket advertising an endpoint the public path cannot reach.
+
+  📌 **Four sockets on 443, only two of them Caddy's.** The two tailnet ones belong to `tailscale serve`. Anyone reading `ss` output here and assuming Caddy bound wildcard would be wrong — check the address, not just the port.
 - **ufw allow-list — ✅ RE-SCOPED 2026-08-13.** `Default: deny (incoming), allow (outgoing)`, `IPV6=yes`. Six rules, unchanged in ports, now all sourced from the post-FortiGate subnet:
 
   | Port | Proto | From |
@@ -624,7 +686,8 @@ Run while Danny was away, which is the only time `--sessions` (GPU load) and the
 - [`setup-labserver-msg.sh`](setup-labserver-msg.sh) — ✅ **INSTALLED + LIVE.** Installs `hey`: a shared on-box conversation in `/srv/msg/chat.log`, group `users`, with `/etc/profile.d` + `PROMPT_COMMAND` hooks so unread messages appear at login *and* before the next prompt of an already-open shell. Local only — no port, no daemon, no ufw change, nothing leaves the box.
   - On-box state: `/usr/local/bin/hey`; spool `/srv/msg` is `root:users 2775` **setgid + sticky**; `chat.log` `rw-rw-r-- root:users`; per-user markers `/srv/msg/.read.<user>` hold a **byte offset**; hook at `/etc/profile.d/zz-hey.sh`.
   - ✅ **BOTH HALVES PROVEN 2026-08-13.** Write path verified earlier (post → log → Romulus watcher mirror). **Read path verified 14:26** — after the 14:13 reboot, `/srv/msg/.read.deks` advanced **twice on its own** (14:23 at offset 194, then 14:26:25 picking up a message posted at 14:26) with no action from us. A marker only advances when `hey` actually executes in that user's shell, so delivery to a **second user** is confirmed, and confirmed surviving a reboot with spool state intact.
-  - ⚠️ **`deks` has still never posted a message**, and reported that "hey didn't work." Two likely causes, both benign:
+  - ✅ **CLOSED 2026-09-01 — `deks` has used it.** Two messages from him in `/srv/msg/chat.log` dated **2026-08-19 09:42**, unprompted and conversational ("also i just wanted to use hey right quick lol"). Both halves of the tool are now proven in the field, and the diagnosis below was right: it was the timing, and a fresh login shell fixed it. Superseded note follows.
+  - ⚠️ ~~**`deks` has still never posted a message**~~, and reported that "hey didn't work." Two likely causes, both benign:
     1. **Timing.** The hook was written 09:52 and the binary 10:01, but Danny's console session started **08:37** — `/etc/profile.d` only runs for *new* login shells, so that session never had the hook. His post-reboot session does. **Likely already fixed; just ask him to retry.**
     2. **Shell quoting.** See the lesson below — an apostrophe is the probable culprit.
   - 📉 **DEPRIORITISED — Jon and Danny talk on the phone.** Every real request (including "shut the server down") arrived verbally. Leave `hey` installed; don't invest further. The genuinely useful half was the **presence check**, not the messaging.
@@ -637,6 +700,11 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - ✅ **Long self-test PASSED 2026-08-11** — `Extended offline / Completed without error`, full 4 TB surface read, zero read errors. Health quartet (5/197/198/199) all zero as of 2026-08-12. Thermal curve in smartd's attrlog corroborates the full ~8 h window. **Caveat stands:** media proven good, but 5.3 years of power-on hours is the risk — never the sole copy.
 - **Layout:** `stacks/` (compose per service, **authored not deployed**), `projects/` (linenlady, minecraftserver), `data/` (bind-mount volumes), `backups/`, `docs/`, `bin/health.sh`, `secrets/` (0700, gitignored).
 - **Stacks staged:** cloudflared, ollama (+open-webui), jellyfin, immich, nextcloud — all loopback-bound by default; nothing started.
+- 🆕 **[`nextcloud/`](nextcloud/) — authored 2026-09-01, NOT deployed.** The real movie/home-video ingest stack, replacing the scaffold placeholder (which was MariaDB, no Redis, no media path, no proxy config). Postgres 16 + Redis + `nextcloud:30-apache`. **Publishes no host port** — Caddy reaches it by container name over `edge`. Redis is not optional here: without it Nextcloud falls back to database file locking, which throws spurious "file is locked" errors under exactly the big concurrent uploads this exists for. Bind-mounts `/srv/datakiin/data/media` so uploads land as **real files with real names** via External Storage; Nextcloud's internal object store would be invisible to Jellyfin.
+  - **Two Jellyfin libraries, because the library TYPE decides behaviour:** `media/movies` → type **Movies** (scrapes TMDB, needs `Title (Year)/Title (Year).mkv`, `[imdbid-tt...]` to pin a wrong match) and `media/home-videos` → type **Home Videos & Photos** (no scraping). Family footage in a Movies library fails to match and displays as a mess; a real film in a Home Videos library gets no metadata at all. ⚠️ **Uploads do not arrive correctly named — renaming is the real ongoing chore**, not the transfer.
+  - Added to Danny's **existing** Jellyfin as new libraries. `/mnt/media` is owned by `deks` and `jony` **cannot write there**; these live on Jon's own drive instead, which is the writable half of the arrangement.
+- 🗑️ **`files/` (Syncthing + FileBrowser) — DELETED 2026-09-01.** Authored and removed the same day: Syncthing mirrors rather than uploads, so it was the wrong shape once the requirement turned out to be many-to-one ingest. FileBrowser went with it because Nextcloud's own web UI already does the renaming it would have been kept for. See the tool-fit lesson.
+- 🔐 **Wildcard cert decision (2026-09-01).** The repo Caddyfile now issues one **`*.datakiin.com`** instead of one cert per hostname, because **every certificate a public CA issues is published to Certificate Transparency logs** — so issuing for `cloud.datakiin.com` announces that hostname worldwide within seconds, with no DNS record and no reachability needed. A wildcard shows only `*.datakiin.com`. Only possible because issuance is DNS-01; HTTP-01 cannot do wildcards. ⚠️ **Add new services as a matcher + `handle` block inside that site**, never as a new top-level block, or Caddy issues a separate cert and publishes the name anyway.
 - ## 🎉 **[`web/`](web/) — PUBLIC PATH PROVEN, LIVE 2026-08-13 at `lab.datakiin.com`**
 
   The first thing on labserver reachable from the open internet, and deliberately a page nobody cares about rather than a real service. A boring `nginx:alpine` static site at `/srv/datakiin/stacks/web/`, **publishing no host ports** — it joins the external `edge` network that cloudflared also joins, so the *only* route in is the tunnel. *(The `nginx:alpine` here is a static file server inside a container, not the reverse proxy — it does not conflict with the Caddy decision.)*
@@ -669,36 +737,109 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 
 ## Status / next steps
 
-> 🔴 **ACTIVE 2026-08-29 — Danny's house switched from Comcast to Verizon Fios. `10.0.0.0/24` (his house LAN) no longer exists.** Nothing is broken *by us*; a fair amount of this document now describes a network that is gone.
+> ✅ **RESOLVED 2026-09-01 — labserver is back and the Fios swap is fully measured.** The 🔴 ACTIVE block that stood here (2026-08-29) is answered. Danny powered the box back on; it booted **2026-09-01 08:29** and needed no reconfiguration at all.
 >
-> **State right now, measured 2026-08-29:** labserver is **offline on the tailnet** (last seen Aug 28 21:51 EDT) and `lab.datakiin.com` returns **530** — Cloudflare's "tunnel has no live connections." Both are expected: **Danny powered the box off deliberately** (it is loud and he sleeps near it). Both Tailscale and cloudflared are outbound-initiated, so *a powered-off box and a box with no internet path produce identical symptoms* — ⚠️ **we cannot yet tell whether the FortiGate survived the ISP swap.** That only becomes visible when the box is back on.
+> | Value | Before (Comcast) | Now (Fios), measured 2026-09-01 |
+> |---|---|---|
+> | Public WAN | `73.132.162.205` | **`71.166.138.197`** (Verizon) |
+> | House gateway | `10.0.0.1` | **`192.168.1.1`** — read off the `ttl=2` hop, not guessed |
+> | labserver LAN | `192.168.50.10` | ✅ **unchanged** — the FortiGate survived the swap |
+> | Default route | `192.168.50.1` | ✅ **unchanged** |
+> | `enp2s0f0` link speed | assumed GbE | ✅ **1000 Mb/s — confirmed.** The predicted cap is real |
+> | Karla's isolation | 🚨 unverified | ✅ **VERIFIED** — see the FortiGate section |
+> | Tailscale `100.86.218.41` | unchanged | ✅ **unchanged — a fifth topology change survived with zero config edits** |
 >
-> ⚠️ **Jon's house is NOT affected.** Romulus still answers on `10.0.0.172` (verified 2026-08-29). Both households ran Comcast's default `10.0.0.0/24`, so the two CLAUDE.md files share the subnet string — **the `10.0.0.0/24` in [FamilyNetwork](../CLAUDE.md) is still live and correct. Do not "fix" it.**
+> ⚠️ **One prediction in the old block was wrong, and it is worth keeping.** It said the FortiGate WAN "**will not reach the internet until reconfigured**." It reconfigured itself: the WAN interface evidently held a **DHCP lease**, not the static address the runbook assumed, so it simply took a new one from the Fios router and carried on. The doc had already flagged that nothing here ever *measured* it as DHCP — that caveat was correct and the confident prediction built on top of it was not. **A stated uncertainty does not stop propagating just because a later paragraph sounds sure.**
 >
-> **What the swap invalidates here** — all of it *method-correct, address-wrong*:
+> ➖ Steps 1–4 of the old checklist are done. **Step 5 — redo the port-forward chain — is now MOOT**, designed out entirely by the consolidation below.
+
+> ▶️ **ACTIVE 2026-09-01 — consolidation onto labserver, everything public via a WireGuard VPS**
 >
-> | Claim | Status |
-> |---|---|
-> | House gateway `10.0.0.1` | ❌ gone. Fios routers typically hand out `192.168.1.0/24` — **unmeasured, do not assume** |
-> | Public WAN `73.132.162.205` | ❌ gone. New Fios IP **unknown**; every `--resolve` verification command in [`RUNBOOK-port-forward.md`](RUNBOOK-port-forward.md) targets the dead address |
-> | FortiGate WAN on `10.0.0.x` | ❌ its upstream no longer exists. If it was pinned static it now holds an address on a vanished subnet and **will not reach the internet until reconfigured** |
-> | Double-NAT topology (TTL probe) | ⚠️ re-measure — probably still two NATs, but it is different hardware now |
-> | **Karla's isolation verdict** | 🚨 **UNVERIFIED** — see the warning above the FortiGate section. Highest priority. |
-> | 41 Mbps upload ceiling | 🔄 **void** — he took **Fios 5 Gig symmetric** ($104.99/mo). Upload stops binding entirely; **NVENC's 8 sessions now bind, by ~15×** |
-> | Egress traffic-shaping, "required before launch" | ✅ **can be dropped** — it existed only to stop 4 streams saturating 41 Mbps and disrupting Karla's calls |
-> | 🚧 **A bottleneck nobody bought** | **The FortiGate 40F is a 5× *GbE* device**, so labserver's segment caps at ~1 Gbps regardless of what the ONT delivers. Not a problem — 24× the old pipe — but **Danny will benchmark ~940 Mbps from the server and think something is broken. Tell him before he does.** |
-> | "Comcast blocks inbound 80" | ➖ moot (Fios does not block it, and DNS-01 means we never wanted it) |
-> | `192.168.50.0/24` FortiGate LAN | ✅ unchanged — and does **not** collide with a `192.168.1.0/24` Fios LAN |
-> | Tailscale `100.86.218.41` | ✅ unchanged. **The fourth address change this box has survived with no config edit** — the admin-plane argument proving itself again |
+> Jon's goal, stated 2026-09-01: run the Minecraft servers, Jellyfin, websites and a large-file upload point on labserver in Docker, with public traffic reaching it through the rented VPS rather than a hole in Danny's router. 📗 Full phased plan, diagram and verification steps: **[Datakiin Consolidation artifact](https://claude.ai/code/artifact/4d8bebff-510e-4f23-a41d-03848d559d41)**.
 >
-> **When the box is back on, in this order — measure, do not assume:**
-> 1. **Does labserver have internet at all?** `tailscale status` from Romulus is the cheapest test. If not, the FortiGate WAN needs re-pointing at the Fios router — **DHCP first to restore service, pin static afterwards.**
-> 2. **Re-derive the new house gateway** from labserver: TTL-limited probe toward `1.1.1.1`, read the `ttl=2` hop. Do not guess `192.168.1.1`.
-> 3. 🚨 **Re-run the isolation test against that new address** — ICMP **and** TCP 80/443/53, with `1.1.1.1:443` as the control. ICMP alone is a false pass.
-> 4. **Re-measure the uplink** ([`diag-labserver-streaming.sh`](diag-labserver-streaming.sh)) and check labserver's own link speed (`ethtool enp2s0f0 | grep Speed`). The *tier* is known (5 Gig); the number actually **delivered** through two NATs and a GbE firewall is not.
-> 5. Get the new public IP, then redo the port-forward chain against the Fios router. **The DDNS gap is now urgent rather than theoretical** — the address has changed once already, exactly as predicted.
+> **Decisions taken 2026-09-01:**
 >
-> 📌 **Worth saying plainly: we recommended this, and he went further.** [`FOR-DANNY.md`](FOR-DANNY.md) put **Fios 300/300 at $59.99** in front of him as an optional upgrade, and warned it meant "downtime plus redoing the FortiGate WAN setup." He took **5 Gig at $104.99** instead — his bill, his call, and the bundled perks offset part of it. Note only that **everything above ~1 Gbps is unreachable from labserver's segment by design** (the FortiGate's GbE ports), so the extra tier benefits **his house, not this project**. Worth telling him so he isn't surprised; not worth arguing about. **The FortiGate WAN redo is the outstanding work**, and the underlying recommendation was sound — a symmetric line dissolves the one ceiling no amount of hardware could move.
+> | Question | Decision | Why |
+> |---|---|---|
+> | Jellyfin | **stays native, Caddy fronts it** | Danny's service works; containerising needs `nvidia-container-toolkit` first or transcoding silently drops to CPU (8 streams → ~3) |
+> | Websites | **stay on the Cloudflare Tunnel** | free, absorbs DDoS, zero VPS bandwidth. The video ToS problem never applied to static content |
+> | Large uploads | **Nextcloud** | uploads are multi-GB and batchy; it chunks and resumes. A single-POST uploader loses a 20 GB transfer to one dropped connection |
+> | Who uploads | **Danny on Samba; everyone else public with a login** | Danny is on the LAN and already has a writable share. Others get a page with nothing to install |
+> | Threat model | **in-transit confidentiality only** | ✅ **Clarified by Jon 2026-09-01: Danny seeing the data is fine; the concern is interception by people outside the family network.** TLS already solves this in full |
+>
+> **What the VPS design deletes** — all of it blocked on Danny doing console work on a brand-new Fios router, and none of it now needed: the 443 port-forward, the FortiGate VIP and its wan→DMZ policy, pinning the FortiGate WAN static, and the `dg.datakiin.com` DDNS gap. Every path is outbound-initiated, so NAT is never asked for permission. 📕 **`RUNBOOK-port-forward.md` was therefore OBSOLETE, not merely stale** — it targeted the dead Comcast WAN *and* a chain we no longer intend to build. **Deleted 2026-09-02**; recoverable at `HEAD:LabServer/RUNBOOK-port-forward.md`.
+>
+> **Order of work:**
+> 1. ~~Recover Caddy~~ ✅ **DONE 2026-09-01** — see the incident below.
+> 2. 🟡 **Deploy Nextcloud + the wildcard Caddyfile together** — authored in [`nextcloud/`](nextcloud/), not deployed. ⚠️ **The repo Caddyfile is deliberately ahead of the box** (repo `a5575a0b…`, box `0e3598de…`): the box still serves the single-site version. Pushing it **issues a fresh `*.datakiin.com` certificate**, so do it on purpose, alongside Nextcloud, not as a side effect.
+> 3. 🌐 **Stand up the VPS + WireGuard** — 🟡 **BOX RENTED AND HARDENED 2026-09-02; tunnel half-built.**
+>
+>    | | |
+>    |---|---|
+>    | Instance | Linode **Nanode 1 GB**, Debian 13 (trixie), kernel 6.12.88, label `datakiin-relay` |
+>    | Region | **`us-iad`** (Washington, DC) |
+>    | **Public IPv4** | **`172.233.207.73`** |
+>    | Public IPv6 | `2600:3c05::2000:f2ff:fe69:21fe/64` — **it has one**, so firewall sources must cover v6 |
+>    | **Price** | ✅ **$5/mo ($0.0075/hr) — read off the order page, not recalled.** 1 vCPU / 1 GB / 25 GB / 1 TB transfer / 1 Gbps out |
+>    | Disk encryption | on (free; covers datacenter disk disposal/RMA, nothing else) |
+>    | Backups | **off** — $2/mo to protect a stateless box `setup-vps.sh` rebuilds in ten minutes |
+>
+>    **Cloud Firewall `datakiin-relay-fw`**, attached at create (the newer *Linode Interfaces* model exposes a "Public Interface Firewall" field on the create form, so no unfirewalled window). Default inbound **DROP**, outbound **ACCEPT**; inbound allows only **51820/udp**, **443/tcp**, **22/tcp** from all IPv4+IPv6. ⚠️ **ICMP is therefore dropped — `ping` is not a liveness test for this box.** The `ssh-temp` rule is labelled for deletion once the tunnel is up and admin moves to `10.10.0.1`. Deliberately **no 443/udp** (HTTP/3 not forwarded).
+>
+>    **SSH hardened and verified both ways.** Linode shipped it `permitrootlogin yes` / `passwordauthentication yes`; a drop-in at `/etc/ssh/sshd_config.d/10-datakiin.conf` sets `PermitRootLogin prohibit-password` + `PasswordAuthentication no` + `KbdInteractiveAuthentication no`, validated with `sshd -t` **before** the restart. Verified: key auth succeeds under `StrictHostKeyChecking=yes`, and password auth returns **`Permission denied (publickey)`** — the same two-sided proof used on Remus and Bubba. Host keys were **pre-staged into `known_hosts` from `ssh-keyscan`**, so the first real connect never prompted; ed25519 fingerprint `SHA256:FZMOiNW2rK+vQZWCcd1ls9ka7Jk0BTF/+QEz0/aRF4w`. ⚠️ **That is trust-on-first-use** — there was no prior record to compare against, unlike the Remus rename. Confirmable against the Lish console if it ever matters. Hostname set to `datakiin-relay` (Linode leaves it `localhost`).
+>
+>    `~/.ssh/config` on Romulus gained **`vps`** and **`labserver`** aliases — the latter closes the long-standing TODO under Access. Backups at `~/.ssh/config.bak-prevps-20260902` and `~/.ssh/known_hosts.bak-prevps-20260902`.
+>
+>    **`setup-vps.sh` pass 1 run** — `wireguard-tools` + `nginx-full` (1.26.3) installed, keypair generated. **VPS WireGuard public key: `BLe077m+kenV9WWoFzQsITKR20L5ccRGyc6IIOYqyzE=`.** ✅ nginx's default `:80` vhost was removed straight after (unreachable anyway — 80 is not in the firewall — but a bind address beats relying on a firewall rule). `ss -tlnp` on the box now shows **sshd and nothing else**.
+>
+>    ✅ **TUNNEL UP 2026-09-02.** All four passes run; labserver's pubkey `TXj5F/zRUranFo6czqbE3RKmfUCw6Qn/hW8n9IIAKy0=`, VPS `10.10.0.1`, labserver `10.10.0.2`, handshake established both directions, **0% loss, RTT 5.98 ms**.
+>
+>    🔥 **The design's central claim is now measured, not argued.** The VPS config has **no `Endpoint` line** for labserver — it learned the address from the first handshake and `wg show` on the VPS reports `endpoint: 71.166.138.197:57521`, Danny's Fios WAN. So the VPS can push traffic down a tunnel it did not open, with **no port-forward on the Fios router and no VIP or policy on the FortiGate.** That is what deletes every task that needed Danny at a console, and it is why the whole port-forward chain is obsolete rather than merely stale. The 5.98 ms also validates the `us-iad` choice empirically — it was picked on the argument that Danny is DC-metro.
+>
+>    ✅ **Isolation re-tested immediately after, per the standing rule** — labserver → `192.168.1.1`: route exists via `192.168.50.1` (so traffic is *dropped by policy*, not merely unrouted), ICMP **100% loss**, TCP **80/443/53/22/8080 all blocked**, control `1.1.1.1` on 443 and 53 **reachable** so the test is valid. Karla's protection is untouched, as predicted — the tunnel opens nothing inbound at the perimeter.
+>
+>    📗 **Step-by-step for what remains: [`RUNBOOK-vps-cutover.md`](RUNBOOK-vps-cutover.md)** — pre-flight state check, the two file copies, the recreate, five verification steps, the outside-in proof, DNS, the Jellyfin known-proxies ask for Danny, and a one-command rollback.
+>
+>    ## 🎉 **PUBLIC PATH LIVE 2026-09-02 — the whole chain works end to end**
+>
+>    Caddy deployed with the tunnel publish and PROXY protocol; box and repo byte-identical again (Caddyfile `009cb7b0…`, compose.yml `38b56004…`; backups `*.bak-prevps-20260902`).
+>
+>    | Check | Result |
+>    |---|---|
+>    | Listeners | **`192.168.50.10:443`** (house) + **`10.10.0.2:443`** (tunnel). **No UDP 443** — h3 off to match the VPS |
+>    | Certificate | **`CN=*.datakiin.com`**, `C=US, O=Let's Encrypt, CN=YE1`, `Sep 2 14:08:10` → `Dec 1 2026` |
+>    | LAN-direct | **`http=302 verify=0 proto=2`** |
+>    | VPS → Caddy | `443 OPEN over tunnel` |
+>    | **Outside-in from Romulus** | **`http=302 verify=0`**, issuer Let's Encrypt, wildcard subject — `connect=0.036s total=0.225s` |
+>    | HTTP/2 through the tunnel | **`ALPN: server accepted h2`** |
+>
+>    **The live path: internet → VPS `172.233.207.73:443` → nginx stream → WireGuard → Caddy `10.10.0.2:443` → Jellyfin.** No inbound rule at Danny's perimeter; no port-forward, no VIP, no FortiGate policy.
+>
+>    ✅ **The `proxy_protocol` LAN risk resolved in the good direction.** The concern was that `listener_wrappers` applies to *both* published addresses while house clients send no PROXY header. Caddy's `allow 10.10.0.1/32` does make the header **optional** for other sources — measured, not assumed: LAN-direct returns 302 over h2. **Had it gone the other way, every house client would have broken**, which is why it was tested before being believed.
+>
+>    ✅ **PROXY protocol is provably being parsed** — not by reading a log, but because the public path works *at all*. If Caddy were not handling the header it would read `PROXY TCP4 …` as a TLS ClientHello and every connection through the VPS would fail. What remains unproven is that the client IP *propagates to Jellyfin*, which is exactly what the Known-proxies step verifies.
+>
+>    🟡 **Caddy has no `log` directive**, so it emits errors but **no access log**. A public-facing proxy with no request log is a real gap — worth adding independently of this work.
+>
+>    ## 🎉 **`https://watch.datakiin.com` IS LIVE — DNS in, browser-verified 2026-09-02**
+>
+>    | Check | Result |
+>    |---|---|
+>    | DNS | `watch.datakiin.com` → **`172.233.207.73`** |
+>    | **Grey cloud** | ✅ **confirmed by measurement** — the answer is the Linode address, not Cloudflare anycast (`104.21.x` / `172.67.x`). Proxied would have meant family video crossing Cloudflare's CDN, the exact ToS risk this whole door exists to avoid |
+>    | End-to-end, real DNS, no `--resolve` | **`http=302 verify=0 remote_ip=172.233.207.73`** |
+>    | Browser | Jellyfin login page renders, **no certificate warning** |
+>
+>    🔤 **The hostname is `watch`, not `jellyfin`.** Chosen so family reading it off a text message need not know what Jellyfin is. **The rename cost nothing** — the wildcard cert already covered it, so there was no reissue, no ACME round-trip and no new Certificate Transparency entry; only the Caddyfile matcher (`@watch host watch.datakiin.com`) and the DNS record changed. ⚠️ **Those two must always agree:** a DNS name with no matching `@` block falls through to `handle { abort }`, so TLS completes and the connection then closes — which reads as a broken server, not a config mismatch.
+>
+>    ⏳ **One step remains and it is Danny's:** **Jellyfin → Networking → Known proxies → `172.20.0.0/24`**. Until it lands, Jellyfin files every internet viewer as *local* and applies **no remote bitrate cap**. Ask for the NVENC confirmation at the same time (Playback → Transcoding → Hardware acceleration) — the 8-session capability is measured but the *setting* has never been read.
+>
+>    ✅ **The DDNS gap is deleted, not solved.** Every earlier draft needed a dynamic-DNS updater because the record pointed at a residential IP on a changing lease — hence the planned `dg.datakiin.com` indirection. **A Linode address is static.** Write the record once; `dg.datakiin.com` is no longer needed and should be dropped rather than built.
+>
+>    Original authoring note: ✅ **fully authored 2026-09-01 in [`vps/`](vps/)** (`setup-vps.sh`, `setup-labserver-wireguard.sh`, `nginx-stream.conf`, README with the rental spec). Chosen **Linode Nanode 1 GB, Washington DC (`us-iad`)**, ~$5/mo expected, 1 TB traffic, IPv4 included. ⚠️ **Hetzner was recommended twice and dropped:** it is cheap in the EU and not in the US — the only Ashburn plan was **CPX11 at $21.09/mo**, ~3× its EU equivalent. 📌 **Three price figures were quoted in this project from memory and two were flatly wrong** ("$4–5/mo, ~20 TB", then "€11.99/mo, 0.5 TB"). `us-iad` is the same metro as Ashburn, so the Minecraft-latency argument is unchanged. The [`vps/`](vps/) scripts are provider-agnostic — only the firewall step differs. Ashburn is chosen for Minecraft latency: Danny is DC-metro (Cloudflare serves him from `IAD`, his Verizon hop is East Coast). Tunnel subnet **`10.10.0.0/24`**, checked against every subnet in play. Everything public depends on this step.
+> 4. ⛏️ **Migrate Minecraft off Romulus.**
+>
+> **Open:** `files/` (Syncthing + FileBrowser) is authored but **orphaned** — Syncthing was the wrong tool once the requirement turned out to be many-to-one ingest rather than mirroring. Either delete it or keep FileBrowser alone for renaming uploads into Jellyfin's convention.
 
 > ▶️ **ACTIVE 2026-08-13**
 >
@@ -707,18 +848,17 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 > **Order of work:**
 > 1. ~~Rebind Ollama~~ ✅ **DONE 2026-08-13**, verified from Romulus (11434 refused, API unreachable, 22 still up).
 > 2. ~~Re-scope ufw~~ ✅ **DONE 2026-08-13** — six rules moved `10.0.0.0/24` → `192.168.50.0/24`.
->    - 📨 [`FOR-DANNY.md`](FOR-DANNY.md) — **the handoff document.** Everything Danny needs in one place: what was built, **a full disclosure list of what we changed on his machine**, the four config steps with field values, the open questions, his Jellyfin settings, the measured 41 Mbps capacity table, the Fios option, and a rollback for every piece. Written for him, not for us — assumes no knowledge of this repo. Give him this, not the runbook.
-- 📗 [`RUNBOOK-port-forward.md`](RUNBOOK-port-forward.md) — the same port-forward work in operator detail (failure-symptom table, verification method). Our reference; `FOR-DANNY.md` is the version to actually send. Static FortiGate WAN → Comcast forward 443 → FortiGate VIP → policy → verify from cellular → *then* DNS → re-test isolation. Written to be followed at a console, including by Danny.
+>    - 🗑️ **`FOR-DANNY.md` and `RUNBOOK-port-forward.md` were DELETED 2026-09-02.** Both documented the port-forward chain, and the VPS design deleted that chain entirely — so both had become instructions for work that must *not* be done. `FOR-DANNY.md` was the dangerous one: it told Danny to point DNS at his own WAN and open 443 at his perimeter, which would have punched a hole for no reason. Recoverable from git at `HEAD:LabServer/FOR-DANNY.md` and `HEAD:LabServer/RUNBOOK-port-forward.md` if the history is ever wanted. **What Danny is actually asked for now is two settings, both in Jellyfin** — see the Known-proxies and NVENC items in the status section. If a fresh handoff doc is ever needed, write it against the VPS design rather than reviving either file.
 - [`setup-labserver-postgate.sh`](setup-labserver-postgate.sh) does both idempotently (`--dry-run`, `--ollama-only`, `--ufw-only`) and **derives the LAN subnet at runtime rather than hard-coding it**. Both fixes were run by hand this time because Jon was already in an SSH session; the script is kept as the repeatable record and is the better path next time — this address has now moved three times in four days.
 > 3. 🗣️ **Phone Danny** — the five questions under Karla's requirement, especially Samba and the company-firewall ambiguity.
 > 4. 🐳 **Install Docker** — [`setup-labserver-docker.sh`](setup-labserver-docker.sh) is written and waiting.
 > 5. ~~🌐 **Public path proof**~~ ✅ **DONE 2026-08-13 — `lab.datakiin.com` is live** through a new `labserver` tunnel, origin IP hidden, zero inbound ports. The domain-plan blocker is resolved: **subdomains under `datakiin.com`**, starting with `lab`. The existing `Datakiin` tunnel on Romulus was left untouched.
-> 6. ~~🔐 **Caddy + Let's Encrypt (DNS-01)** on labserver~~ ✅ **DEPLOYED 2026-08-14** — real LE cert for `jellyfin.datakiin.com`, trust-store validated, proxying to Danny's native Jellyfin, 443 bound to the LAN IP only (refused from the tailnet), isolation re-verified intact.
+> 6. ~~🔐 **Caddy + Let's Encrypt (DNS-01)** on labserver~~ ✅ **DEPLOYED 2026-08-14** — real LE cert for `watch.datakiin.com`, trust-store validated, proxying to Danny's native Jellyfin, 443 bound to the LAN IP only (refused from the tailnet), isolation re-verified intact.
 >    - ✅ The single 502 in the log was a **one-off during setup**, fixed by a ufw rule (`8096/tcp from 172.20.0.0/14`) before it was ever noticed. Not intermittent, not a blocker. A 🟡 **robustness tidy-up** (pin `extra_hosts` to `172.20.0.1`, narrow the `/14` to `/24`) is written up but explicitly **does not gate the launch**.
 >    - **Next: the two off-box steps** — the **`jellyfin` A record** (currently NXDOMAIN — grey cloud, plus the DDNS gap) and the **port-forward chain** with Danny. Both written out under "The two steps still needed."
 >    - Then the **odin auth layer**.
 > 7. ⛏️ **Migrate the Minecraft stack** off Romulus (newly in scope).
-> 8. 🌐 **Stand up the game-door VPS** — decided 2026-08-27, not yet built. Rent a small box with a public IPv4, WireGuard from labserver **outbound**, mc-router on the VPS for TCP 25565, a UDP range for voice, provider firewall (not ufw). No provider chosen. **Needs nothing from Danny** — no router forward, no FortiGate rule — which is most of the point. See "The game door"; the Minecraft-side detail is in [`MinecraftServers/CLAUDE.md`](../../MinecraftServers/CLAUDE.md).
+> 8. 🌐 **Game-door VPS** — ✅ **box + tunnel BUILT 2026-09-02** (`172.233.207.73`, WireGuard `10.10.0.1` ↔ `10.10.0.2`, Linode Cloud Firewall). ⏳ **Game half still to do:** mc-router on the VPS for TCP 25565 and the `24454-24473/udp` voice range, plus the matching firewall rules — deliberately not open yet. **Needs nothing from Danny** — no router forward, no FortiGate rule — which is most of the point. See "The game door"; the Minecraft-side detail is in [`MinecraftServers/CLAUDE.md`](../../MinecraftServers/CLAUDE.md).
 >
 > ✅ **Settled:** Danny asked for this and consents; Jon pays; ~$4–5/mo recurring (the game-door VPS) and $0 one-time; Docker not Kubernetes; Caddy not nginx/Apache; **no VPS for the web door** (a VPS does carry game traffic — decided 2026-08-27); mini scrapped.
 >
@@ -738,7 +878,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - **Isolation requirements are directional — check which way before assuming a conflict.** "labserver must not reach the house" and "the house must reach labserver's file shares" sound contradictory and are not: one is outbound from the untrusted host, the other inbound to it, and a stateful firewall's return traffic grants no pivot. We had queued a painful Samba-vs-isolation decision for Danny; the right question dissolved it. **Ask "in which direction?" before designing a trade-off around a constraint.**
 - ⚠️ **Changing ISP deletes the subnet your security policy is written against — and the policy keeps looking correct.** Danny swapping Comcast for Fios (2026-08-29) removed `10.0.0.0/24` from existence. Every rule, probe and runbook value keyed to that subnet is now matching nothing, **including the FortiGate deny that is Karla's protection** — if it was written as a `10.0.0.0/24` address object rather than interface-to-interface, isolation silently became a no-op with a green UI. This is the third instance of the same failure in this project (ufw rules left pointing at `10.0.0.0/24` after the FortiGate cutover; `ip_forward` flipped by a Docker install), so the general form is worth stating: **a control expressed as a literal address is only as durable as the network it names.** Prefer interfaces, zones and names over addresses — the same reasoning that keeps `HostName` names in `~/.ssh/config` and made Tailscale survive four address changes without an edit. And **re-verify every address-keyed control after any upstream change, not just after changes you made.**
 - 🚧 **Bandwidth bought past your narrowest device is bandwidth you cannot use — and the narrow device is never the one you were thinking about.** Danny replaced a 41 Mbps Comcast uplink with **Fios 5 Gig symmetric**, a ~122× increase that labserver will never see: every packet to it crosses a **FortiGate 40F, whose five ports are all GbE**. Meanwhile the service ceiling had already moved somewhere else entirely — NVENC's measured **8-session cap** now binds ~15× before either bandwidth number matters. **When a bottleneck moves, go find the new one before celebrating**, and enumerate the *intermediate hops*, not just the endpoints. Corollary with teeth here: the right response to the GbE cap is **not** to take the firewall out of the path — it is the control protecting Karla, and 1 Gbps is already 24× what we had.
-- 📌 **An upgrade you recommended is still a change you have to absorb.** Fios was our suggestion, correctly — a symmetric line dissolves the 41 Mbps ceiling that no hardware could move. It also invalidated the public IP, the house gateway, the double-NAT hop map, the whole port-forward runbook and the entire streaming-capacity analysis in one evening. **Recommending an infrastructure change means owning the re-measurement it forces**; budget for that when you write the recommendation, and say so in it. [`FOR-DANNY.md`](FOR-DANNY.md) did flag "downtime plus redoing the FortiGate WAN setup", which is why this is a chore and not a surprise.
+- 📌 **An upgrade you recommended is still a change you have to absorb.** Fios was our suggestion, correctly — a symmetric line dissolves the 41 Mbps ceiling that no hardware could move. It also invalidated the public IP, the house gateway, the double-NAT hop map, the whole port-forward runbook and the entire streaming-capacity analysis in one evening. **Recommending an infrastructure change means owning the re-measurement it forces**; budget for that when you write the recommendation, and say so in it. The since-deleted `FOR-DANNY.md` did flag "downtime plus redoing the FortiGate WAN setup", which is why this is a chore and not a surprise.
 - **ICMP-blocked does not mean TCP-blocked.** Verifying isolation with `ping` alone is a false pass. Probe actual TCP ports, and probe **infrastructure (the gateway), not someone's personal machine**.
 - **Verify segmentation empirically, never from the config screen.** FortiOS policies are ordered, first-match; a deny placed below a general allow looks identical in the UI and does nothing. The deliverable is a test result.
 - **Count a free tier's limits against your actual scale before building on it.** playit.gg was the right answer for the game door and stayed right for months; it died to arithmetic, not to a flaw. Eleven worlds × (one TCP game port + one UDP voice port) is 22, against a free-tier cap of 4 and a paid cap of 16 — so the tier that fit at pilot size fit nothing at real size. **A $3/mo tier that does not cover the requirement loses to a €4/mo one that does, and the number that decides it is a port count nobody had multiplied out.** Related: mc-router collapses the TCP side to one port, which is a genuinely large win, and it still does not save the free tier — because UDP cannot be multiplexed the same way and voice is the half that sets the ceiling. **Check whether the clever fix applies to *both* halves of the requirement.**
@@ -766,6 +906,13 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - **An outbound-initiated admin plane survives topology changes.** When the FortiGate re-addressed labserver behind a new NAT, Tailscale kept working with zero config edits — anything pinned to a LAN IP would have been cut off. Also why admin needs no inbound hole in a DMZ.
 - Making a box internet-facing changes the risk profile of **everyone sharing its network** — a household decision, not just an admin one. Ask before building.
 
+- **Ask who exactly you are hiding from, before designing any of it.** A privacy requirement was read as "untraceable, encrypted end to end," and a large design followed: disk encryption, Nextcloud E2EE, anonymous upload links, per-site proxy config to avoid logging client IPs. One clarifying sentence from Jon — *"I'm only worried about during transit, Danny should be able to see it"* — deleted all of it, because **TLS already solved the actual requirement and had done since 14 August.** Two of the discarded items were actively harmful: E2EE would have broken Jellyfin playback outright, and dropping real client IPs would have disabled brute-force protection on a public login page. **The threat-model question is the cheapest design step available, and skipping it builds defences against the wrong adversary.**
+- ⚠️ **Encryption at rest cannot hide data from a service that has to decode it.** Jellyfin must read, transcode and stream these files, so plaintext is required at runtime and the key lives on the running machine. LUKS therefore protects a drive that *leaves the building* — theft, RMA, disposal — and nothing else. Nextcloud's E2EE app fails harder: it means the server itself cannot read the files, so External Storage and Jellyfin both see ciphertext and playback stops. **"Encrypt it" is not one capability — name the observer it must exclude, then check whether your own stack is on that list.**
+- 🔓 **Certificate Transparency publishes every hostname you obtain a certificate for, within seconds.** No DNS record needed, no reachability needed — the logs are public and scrapers watch the feeds specifically for fresh names to probe. **"Nobody knows the URL" has never been a control.** A wildcard cert collapses the leak to the apex, and is only available via DNS-01.
+- ⚠️ **A tunnel that terminates TLS is not a private path.** Cloudflare decrypts everything crossing its tunnel at the edge — fine for public static content, disqualifying for anything private. This is a *second, independent* reason Jellyfin and Nextcloud stay off the tunnel, alongside the video terms-of-service issue. **A provider that terminates your TLS is inside your trust boundary whether you put them there deliberately or not.**
+- **Match the tool to the traffic shape, not to the word in the request.** "File sharing" sounded like Syncthing. Syncthing **mirrors**: every peer receives a full copy of the shared folder, so Danny and Jose joining a movie library would each have pulled down the entire library. The real requirement was **many-to-one ingest of large files** — an upload problem. Related: the right answer differed *per contributor*, since Danny is on the LAN with a writable Samba share that needed nothing built, while remote contributors needed chunked resumable HTTP. **Standardising everyone onto one tool would have made the best-served user worse off.**
+- 📌 **A stated uncertainty does not stop propagating just because a later paragraph sounds confident.** This document correctly noted that nothing here ever *measured* the FortiGate's WAN as static — then predicted it "will not reach the internet until reconfigured" after the ISP swap. It reconfigured itself: the interface held a DHCP lease, took a new one from the Fios router, and carried on. **Carry the hedge forward into every conclusion built on it, or the caveat becomes a footnote under a confident wrong answer.**
+
 **The box**
 
 - **You can read SMART history without root.** `smartctl` needs raw device access, but `smartd` writes **world-readable** state to `/var/lib/smartmontools/`: `attrlog.*.csv` is a 30-minute time series of every attribute. Gives attribute *history* that plain `smartctl -A` doesn't. What it lacks is the self-test log — for pass/fail you still need root.
@@ -776,6 +923,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - **`wtmp.db` records SSH logins ONLY.** A console login on seat0/tty1 never appears. A presence check built on wtmp alone reports "nobody is here" while someone sits at the keyboard. **`loginctl list-sessions` is the authority for who is live** (filter `CLASS == user`; `manager` rows are the per-user systemd instance).
 - A `NULL` Logout in wtmp.db means "still open" **or** "died uncleanly." Discard open rows predating the current boot or a reboot leaves a ghost user logged in forever.
 - Kubernetes on one node is all cost and no benefit — multi-node scheduling, failover and drain-and-migrate are inert without a second node while the control-plane overhead is fully present. Reach for k3s when a second node exists, not before.
+
+- 🔴 **A container can run perfectly while having no network interface at all — and every symptom points somewhere else.** After a reboot Caddy's container came up with only `lo`: no `eth0`, no route, never attached to its `edge` network. That one fact produced a refused published port, unreachability at every bridge address, and ACME failures reading `lookup ... on [::1]:53: connection refused` — because a namespace with no network cannot reach Docker's embedded DNS, so the resolver falls back to loopback where nothing listens. The process was healthy and listening the whole time, on an island. **Check `/proc/PID/net/dev` for `eth0` before theorising about the application**, and compare against a container that works.
+- ⚠️ **`docker restart` cannot repair a broken container network — it reuses the same config.** The fix is `up -d --force-recreate`. Restarting is the obvious first move, comes back identical, and reads as "the problem is deeper than it is."
 
 **Scripting + tooling**
 
@@ -795,3 +945,8 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - **Checksum the deployed copy against the repo copy.** `sha256sum` on both sides of an SSH connection is the cheapest possible answer to "is the box running what version control says it is." All four Caddy files matched; had one drifted, every conclusion drawn from reading the repo would have been about a file that isn't running.
 - **Sanity-check a credential by shape, never by printing it.** `.env` was validated as length 53, no whitespace, no quotes, no CR, `[A-Za-z0-9_-]` only — enough to rule out every common paste error (wrapped quotes, trailing `\r` from Windows, the whole install command pasted instead of the token) without the secret ever entering a transcript. Same technique that caught the `eyJ` tunnel-token mistake.
 - **Unquoted shell arguments are a UX trap for non-technical users.** `hey it's broken` leaves bash at a `>` continuation prompt — indistinguishable from a hang. `>` silently redirects the message into a file; `&` backgrounds it. Any tool taking free text from a shell should offer an **interactive `read -r` prompt** as the primary path, where the shell never parses the input at all.
+- ⚠️ **`/proc/PID/net/tcp` is IPv4 ONLY — dual-stack listeners live in `net/tcp6`.** Reading only the first file showed Caddy holding nothing but its admin socket, which produced a confident and completely wrong "Caddy is serving no sites." It was listening on `[::]:443` and `[::]:80` the entire time. A Go server binding `:443` creates one dual-stack socket that appears **exclusively** in `tcp6`. **Read both, or declare a healthy service dead.**
+- ⚠️ **`/dev/nvmeXn1` numbering is not stable across reboots.** Between 2026-08-11 and 2026-09-02 the 1 TB Kingston moved from `nvme1n1` to `nvme2n1` and the 500 GB Crucial went the other way, with nothing physically touched. The mounts stayed correct **only because `/etc/fstab` keys on UUID** — a script or a backup job that named `/dev/nvme1n1` would now be writing to a different disk, silently and with no error. Same family as the ufw rules left pointing at a dead subnet and the FortiGate policy written against `10.0.0.0/24`: **a control expressed as a literal identifier is only as durable as the thing it names.** Use UUIDs for disks, interface names for NICs, hostnames for hosts.
+- ⚠️ **Two different `curl` binaries are not a controlled comparison.** The public path reported `proto=1.1` while LAN-direct reported `proto=2`, which read as "something in the nginx/WireGuard chain is downgrading HTTP/2" — a plausible, interesting, entirely fictional finding. The LAN test had run on **labserver's** curl and the public test on **Romulus's Git Bash curl, which has no HTTP/2 support at all** (`--http2` errors out; `-v` shows no ALPN lines). Re-run from an h2-capable client and the tunnel negotiates `h2` fine. **Hold the client constant when comparing two network paths**, and when a protocol-level difference appears between two hosts, check the tools before theorising about the wire. Same family as the mawk and `pgrep -f ffmpeg` errors below.
+- ⚠️ **`strtonum()` is a gawk extension; Debian ships mawk, which fails and prints nothing.** An awk probe that had worked minutes earlier was rewritten using `strtonum`, produced empty output, and read as "the container restarted and the state changed" — when the state was identical and only the parser had broken. **When output changes and the system demonstrably did not, suspect the tool before the system.** Same family as the `pgrep -f ffmpeg` and Event-ID-without-provider errors already recorded here.
+- **Long heredocs piped to an interpreter are fragile in this environment; write the script to a file and run it.** Two multi-hundred-line `<<'PY'` blocks died with `unexpected EOF while looking for matching quote` despite being correctly quoted, while short ones in the same session worked fine. Not worth debugging — `Write` the script, then execute it.

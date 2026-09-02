@@ -1,0 +1,120 @@
+{
+	# Let's Encrypt expiry notices land here.
+	email jon.gracias@gmail.com
+
+	servers {
+		# ---------------------------------------------------------------
+		# PROXY protocol -- required, not optional, once traffic arrives
+		# through the VPS.
+		#
+		# nginx on the VPS terminates the client's TCP connection and opens
+		# a fresh one down the tunnel, so without this every request reaches
+		# Caddy from 10.10.0.1. Two things break silently and in the
+		# PERMISSIVE direction:
+		#   - Jellyfin files every internet viewer as LOCAL and applies no
+		#     remote bitrate cap, defeating the one control protecting the
+		#     household uplink.
+		#   - Nextcloud counts every failed login against one address and
+		#     eventually locks out the entire internet.
+		#
+		# ORDER MATTERS: proxy_protocol must come BEFORE tls, or Caddy tries
+		# to parse the PROXY header as a TLS ClientHello and every single
+		# connection fails.
+		#
+		# "allow" is scoped to the tunnel's far end only. Anything else that
+		# sends a PROXY header is not trusted to rewrite its own client IP.
+		listener_wrappers {
+			proxy_protocol {
+				allow 10.10.0.1/32
+			}
+			tls
+		}
+
+		# HTTP/3 off. The VPS forwards TCP only -- nginx's stream module
+		# cannot relay QUIC and 443/udp is closed at the Cloud Firewall.
+		# Leaving h3 advertised would have clients try QUIC, fail, and fall
+		# back to TCP: it works, with a delay on every first connection.
+		protocols h1 h2
+	}
+}
+
+# ---------------------------------------------------------------------------
+# ONE WILDCARD CERT, NOT ONE PER HOSTNAME -- this is a privacy decision, not a
+# convenience one.
+#
+# Every certificate a public CA issues is published to Certificate
+# Transparency logs, which anyone can search (crt.sh, Censys, and a hundred
+# scrapers that do nothing else). Issuing a cert for "cloud.datakiin.com"
+# therefore ANNOUNCES that hostname to the world within seconds, whether or
+# not it has a DNS record and whether or not anyone can reach it. CT is why
+# "nobody knows the URL" is never a real control -- subdomain names leak by
+# design, and attackers routinely watch CT feeds for freshly issued names to
+# probe.
+#
+# A wildcard collapses that: the logs show only "*.datakiin.com". The
+# individual service names never appear.
+#
+# This is only possible because issuance is DNS-01 via the Cloudflare API.
+# HTTP-01 cannot issue wildcards at all.
+# ---------------------------------------------------------------------------
+*.datakiin.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+
+	# --- Jellyfin ----------------------------------------------------------
+	# Danny's Jellyfin runs natively on the HOST, not in a container, so it is
+	# reached through the docker host-gateway rather than by container name.
+	# WebSockets and streaming need no extra directives -- Caddy does both by
+	# default. That is the whole reason this is Caddy and not nginx.
+	#
+	# The hostname is "watch", not "jellyfin": the family reading it off a text
+	# message should not need to know what Jellyfin is. Renaming cost nothing
+	# because the wildcard cert already covers every single-label subdomain --
+	# no reissue, no ACME round-trip, and no new Certificate Transparency entry.
+	#
+	# ⚠️ This matcher and the DNS record must agree. A name with a DNS record
+	# but no matcher here falls through to `handle { abort }` below: TLS
+	# completes and then the connection simply closes, which looks like a
+	# broken server rather than a config mismatch.
+	@watch host watch.datakiin.com
+	handle @watch {
+		reverse_proxy host.docker.internal:8096
+	}
+
+	# --- Movie + home-video ingest -----------------------------------------
+	# Reached by CONTAINER NAME over the shared "edge" network -- the nextcloud
+	# stack publishes no host port at all, so unlike the Jellyfin line above
+	# there is no host-gateway hop and no matching ufw rule to keep in sync.
+	@cloud host cloud.datakiin.com
+	handle @cloud {
+		reverse_proxy nextcloud:80
+
+		# Nextcloud's setup check flags these as errors if they are missing.
+		redir /.well-known/carddav /remote.php/dav 301
+		redir /.well-known/caldav  /remote.php/dav 301
+
+		# This host handles logins and private files, so pin it to HTTPS.
+		header Strict-Transport-Security "max-age=31536000"
+	}
+
+	# --- Anything else -----------------------------------------------------
+	# A wildcard cert means Caddy will now happily terminate TLS for ANY
+	# subdomain, including ones that do not exist yet. Without this, a stray
+	# hostname would fall through to a default site. Close it explicitly:
+	# unknown names get nothing, which is the behaviour already verified for
+	# unknown SNI before the wildcard existed.
+	handle {
+		abort
+	}
+}
+
+# --- Adding a service later ------------------------------------------------
+# Add a matcher + handle block INSIDE the wildcard site above -- do NOT create
+# a new top-level "immich.datakiin.com { ... }" block, or Caddy issues a
+# separate cert for it and publishes that name to CT, undoing the whole point.
+#
+#     @immich host immich.datakiin.com
+#     handle @immich {
+#         reverse_proxy immich-server:2283
+#     }
