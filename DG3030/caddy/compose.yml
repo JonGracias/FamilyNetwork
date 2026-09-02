@@ -1,0 +1,63 @@
+services:
+  caddy:
+    build: .
+    image: caddy-cloudflare:local
+    container_name: caddy
+    restart: unless-stopped
+    # Bound to specific addresses, NOT 0.0.0.0. Docker publishes ports around
+    # ufw, so a bare "443:443" would expose this to every tailnet node as
+    # well.
+    #
+    # Two doors, deliberately:
+    #   192.168.50.10  house clients on the FortiGate LAN segment, direct.
+    #   10.10.0.2      the WireGuard tunnel from the VPS -- this is how the
+    #                  public internet arrives. No inbound rule exists at the
+    #                  Fios router or the FortiGate; the VPS pushes traffic
+    #                  down a tunnel labserver dialed out to establish.
+    #
+    # WARNING: 10.10.0.2 only exists once wg-quick@wg0 is up. If Docker starts
+    # first the publish fails and Caddy will not start. If that bites after a
+    # reboot, add a drop-in to docker.service:
+    #     [Unit]
+    #     After=wg-quick@wg0.service
+    #     Wants=wg-quick@wg0.service
+    ports:
+      - "192.168.50.10:443:443"
+      - "10.10.0.2:443:443"
+    # No UDP publish: HTTP/3 is off (see "protocols h1 h2" in the Caddyfile).
+    # The VPS forwards TCP 443 only -- nginx's stream proxy cannot relay QUIC,
+    # and 443/udp is deliberately NOT open in the Linode Cloud Firewall. A UDP
+    # socket here would advertise an h3 endpoint the public path cannot reach.
+    # No port 80 published: DNS-01 means there is no HTTP-01 challenge, so
+    # no port 80 hole is needed anywhere in the chain.
+    environment:
+      CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates + ACME account live here
+      - caddy_config:/config
+    # Lets Caddy reach Danny's native (non-container) Jellyfin on the host.
+    #
+    # NOT "host-gateway" -- that magic value resolves to the DEFAULT bridge
+    # (docker0, 172.17.0.1), which is DOWN here because every stack uses the
+    # user-defined "edge" network instead. It happens to work anyway (ufw
+    # matches on source, and Linux keeps a down interface's address locally
+    # routable), but that is a stack of coincidences, not a design.
+    #
+    # 172.20.0.1 is the "edge" bridge gateway -- the container's own default
+    # gateway, one hop, no dead interface involved. The subnet is pinned by
+    # default-address-pools (172.20.0.0/14) in daemon.json.
+    # WARNING: this moves if the "edge" network is ever recreated. If you
+    # rebuild edge, re-check this line AND the matching ufw rule.
+    extra_hosts:
+      - "host.docker.internal:172.20.0.1"
+    networks: [edge]
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+    name: edge
+    external: true

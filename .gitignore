@@ -1,3 +1,12 @@
 .claude/
 scratchpad/
 logs/
+watch-labserver-hidden.vbs
+
+# Secrets. .env holds the Cloudflare API token (Zone.DNS:Edit on datakiin.com)
+# -- DNS control is domain control, so this is the most dangerous credential
+# in the project. .env.example is the committed template and stays tracked.
+.env
+*.env
+!.env.example
+secrets/

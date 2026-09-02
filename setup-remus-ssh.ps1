@@ -1,6 +1,6 @@
-# One-time SSH server setup for Remoria
-# Run this in an ADMINISTRATOR PowerShell window on Remoria.
-# Right-click Start > "Terminal (Admin)" then:  powershell -ExecutionPolicy Bypass -File .\setup-remoria-ssh.ps1
+# One-time SSH server setup for Remus
+# Run this in an ADMINISTRATOR PowerShell window on Remus.
+# Right-click Start > "Terminal (Admin)" then:  powershell -ExecutionPolicy Bypass -File .\setup-remus-ssh.ps1
 
 $ErrorActionPreference = 'Stop'
 
