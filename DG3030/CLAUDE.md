@@ -19,11 +19,38 @@ Same hat as FamilyNetwork: a seasoned IT technician (CompTIA A+/Network+), **dia
 | Machine   | Address | Where | OS / notes |
 |-----------|---------|-------|------------|
 | Romulus   | `100.118.236.2` (TS) | Jon's house | Admin workstation → **dev machine only** going forward. Tailscale as `jon.gracias@`. Holds SSH keypair `jon@romulus`. |
-| labserver | **`100.86.218.41` (TS)** · LAN `192.168.50.10` | **Danny's house** | **The workhorse.** Debian 13 (trixie). ASUS PRIME Z490-A, **i7-10700 (8C/16T)**, **62 GB RAM** + 49 GB swap, **RTX 3060 12 GB**. ~3.7 TB free. Owned by `DG3030@`, FQDN `labserver.tail663992.ts.net`. Runs **Jellyfin** (8096) + **Samba**. Login `jony`, key auth, password-required sudo. |
+| labserver | **`100.86.218.41` (TS)** · LAN `192.168.50.10` | **Danny's house** | **The workhorse.** Debian 13 (trixie). ASUS PRIME Z490-A, **i7-10700 (8C/16T)**, **62 GB RAM** + 49 GB swap, **RTX 3060 12 GB**. ~3.7 TB free. Owned by `DG3030@`, FQDN `labserver.tail663992.ts.net`. Runs **Jellyfin** (8096) + **Samba**. Login `jony`, key auth, password-required sudo. ⏰ **Danny powers it OFF overnight — see [Nightly shutdown](#-labserver-is-off-about-12-hours-every-night).** |
 | FortiGate 40F | `192.168.50.1` | Danny's house | 🆕 **The gate.** Installed by Danny 2026-08-13. 5× GbE, no Wi-Fi radio. labserver now sits behind it, isolated from the house LAN. |
 | **datakiin-relay** | **`172.233.207.73`** · tunnel `10.10.0.1` | Linode `us-iad` | 🆕 **The public door.** Rented 2026-09-02. Nanode 1 GB, Debian 13, $5/mo. Stateless relay — **terminates no TLS, holds no cert, stores no data.** SSH alias `vps`, root + key only. Rebuildable from [`vps/setup-vps.sh`](vps/setup-vps.sh). |
 | Ryzen mini (K11) | — | — | ❌ **SCRAPPED.** labserver's 62 GB RAM + RTX 3060 host everything. Not needed, not planned. |
 | Storage | on labserver | Danny's house | **Nothing to buy** — ~3.7 TB free across 3× NVMe + a 2 TB HDD, plus Jon's dedicated 4 TB at `/srv/datakiin`. |
+
+## ⏰ labserver is OFF about 12 hours every night
+
+**Danny powers the machine down overnight so he can sleep.** It is his house and his machine; this is not negotiable infrastructure, it is a housemate's bedroom. Every design decision in this document has to live with it.
+
+**Measured 2026-09-03** from 21 days of `logs/labserver-logins.csv` (hourly poll, so each edge is accurate to the hour):
+
+| Off | Back | Down |
+|---|---|---|
+| 2026-08-29 21:05 | 08-30 09:05 | 12h |
+| 2026-08-30 21:05 | 08-31 08:05 | 11h |
+| 2026-08-31 21:05 | 09-01 09:46 | 12.7h |
+| 2026-09-01 21:05 | 09-02 09:38 | 12.5h |
+| 2026-09-02 23:37 | 09-03 (pending) | — |
+
+**Roughly 21:00 → 09:00, about half of every day.** The pattern is present in the *first* row of the watcher log (2026-08-13) and has held continuously since, so it is the steady state and always has been — it simply went unrecorded for three weeks while this document accumulated detail down to SATA port numbers.
+
+⚠️ **What this means, and it is not small:**
+
+- 🎬 **`watch.datakiin.com` is down every night, during exactly the hours people watch television.** This is the single largest practical limitation on the media build, larger than bandwidth or the NVENC session cap — those degrade quality, this removes the service. **Tell the family the window before handing anyone the URL**, or the first thing they learn about Jellyfin is that it is unreliable.
+- ⛏️ **It collides head-on with migrating Minecraft off Romulus** (roadmap item 4). Romulus runs 24/7; labserver does not. Moving 11 public worlds onto it means the game door dies nightly for *strangers on the internet* — a regression the migration would introduce, and one no amount of VPS relay fixes, because the relay is healthy and the backend is off. **Resolve this before the migration, not during it.**
+- 🌙 **Nothing scheduled overnight ever runs** — `unattended-upgrades`, any cron, and any future backup job. If off-box backups get built (currently deprioritised), they must be scheduled inside the waking window.
+- 🔔 **Do NOT add "unreachable" alerting to [`watch-labserver-logins.ps1`](watch-labserver-logins.ps1).** It would fire every single night. This was proposed on 2026-09-03 and correctly rejected — the watcher logging `UNREACHABLE` overnight is the system working.
+
+📌 **Diagnostic consequence: on this box, "down" is the null hypothesis, not the alarm.** A morning finding of no SSH, a stale WireGuard handshake, Tailscale reporting `offline`, and Cloudflare `530` on `lab.datakiin.com` is the *expected* overnight reading — four signals agreeing, all correct, meaning nothing. **Check the clock against this window before opening an investigation.** Same family of error as `ping` after a firewall change: the measurement is right and the inference is wrong.
+
+**Options if 24/7 is ever genuinely needed** — none taken, all require asking Danny: Wake-on-LAN triggered from the VPS, a scheduled BIOS wake, or relocating the machine somewhere it can run without disturbing anyone. Ask before assuming any of them are acceptable; the constraint is a person's sleep, not a config flag.
 
 ## Access
 
@@ -358,6 +385,58 @@ cd /srv/datakiin/stacks/caddy && sudo docker compose up -d --force-recreate
 2. **Used `strtonum()` in an awk one-liner.** That is a **gawk** extension; Debian ships **mawk**, which errors out and prints nothing — which read as "the state changed" rather than "my parser broke." A second, differently-written probe minutes earlier had worked. **When output changes and the system did not, suspect the tool.**
 
 Also disproved: the first hypothesis was a DHCP race — Docker binding `192.168.50.10:443` before the interface had its address. Plausible, wrong, and it survived only until the logs were read. **The logs named the actual failure in their first line.**
+
+> ⚠️ **Read the 2026-09-03 incident below before reusing that conclusion.** The DHCP race was correctly ruled out *for this incident*. It is the confirmed cause of the **next** one. Same service, same symptom, two different root causes eleven days apart — "disproved" meant disproved on 09-01, not disproved in general.
+
+### 🔴 INCIDENT 2026-09-03 — Caddy did not come back from the nightly reboot, and this time it IS the DHCP race
+
+Found while checking state on a normal morning. labserver was healthy and up since 08:27; `lab.datakiin.com` served 200; the WireGuard tunnel was clean at 0% loss / 5.77 ms — and **`watch.datakiin.com` was dead** with neither of Caddy's listeners present. The container's own state named the cause:
+
+```
+Exited (255)
+err=failed to set up container networking: driver failed programming external
+    connectivity on endpoint caddy: failed to bind host port
+    192.168.50.10:443/tcp: cannot assign requested address
+finished=2026-09-03T12:27:17Z          <- 08:27 EDT, i.e. boot
+```
+
+**Mechanism, measured rather than assumed:**
+
+| Fact | Consequence |
+|---|---|
+| `compose.yml` publishes two **literal** addresses (`192.168.50.10:443`, `10.10.0.2:443`) | those addresses must exist *before* dockerd starts the container |
+| `/etc/network/interfaces`: `allow-hotplug enp2s0f0` + `iface … inet dhcp` | the lease is acquired **asynchronously, after `networking.service` returns** |
+| `systemd-networkd-wait-online` is **disabled** | `network-online.target` is reached **without anything waiting for a routable address** |
+| docker.service's `After=network-online.target` | therefore satisfied trivially, and buys nothing |
+
+🎯 **The corroboration is a clean natural experiment, not a story:** `cloudflared` and the `web` nginx **publish no host ports** and both returned from the same boot without a scratch. **The only container that failed is the only one that binds a host address.** One-for-one.
+
+📌 **The literal binds are still correct and must stay.** Publishing `0.0.0.0:443` would fix the race and simultaneously expose the proxy to every tailnet node, which is the thing the bind-address convention exists to prevent. The race is the *cost* of a correct decision, so it gets paid properly rather than reversed.
+
+🚨 **Why this is not a footnote: [the box reboots every single night](#-labserver-is-off-about-12-hours-every-night).** "Does it survive a reboot" is this machine's daily operating mode, not a corner case. Two of two observed reboots left Caddy down — so the family's media door has been coming up broken every morning and being fixed by hand as a side effect of whatever work happened that day. The 2026-09-02 "public path live" verification does not contradict this: it ran *after* the cutover had already recreated the container.
+
+✅ **Fixed by [`setup-labserver-caddy-boot.sh`](setup-labserver-caddy-boot.sh)** — installs a systemd oneshot (`datakiin-caddy.service`) that waits for every address `compose.yml` publishes to actually appear on the host, then runs `docker compose up -d --force-recreate`.
+
+- **The addresses are parsed out of `compose.yml`, never written into the unit.** This document's own recurring lesson is that a control expressed as a literal address is only as durable as the network it names — the ufw rules left pointing at a dead `10.0.0.0/24`, the FortiGate policy written against a subnet that stopped existing. Re-point the stack and the waiter follows with no edit. Verified: the parse yields exactly `10.10.0.2` and `192.168.50.10`, both matching the host's `ip -4 -o addr` output verbatim.
+- **`--force-recreate`, not `up -d`** — chosen so the unit also repairs the *2026-09-01* failure mode, where the container started but attached to no network at all. One unit, both known reboot failures.
+- It waits on the **precondition that actually failed** (the addresses being assigned) rather than on `network-online.target`, which is demonstrably not a proxy for it on this box.
+
+✅ **Service restored and verified 2026-09-03 15:48 UTC** with `docker compose up -d --force-recreate` (*not* `restart` — see the 09-01 lesson):
+
+| Check | Result |
+|---|---|
+| Caddy listeners | **`192.168.50.10:443` + `10.10.0.2:443`**, TCP only |
+| Container network | **`lo` + `eth0`** — properly attached, unlike 09-01 |
+| veth count | **3** — all three containers |
+| **Outside-in from Romulus**, real DNS, no `--resolve` | **`http=302 verify=0`**, `connect=0.051s total=0.165s` |
+| Resolves to | `172.233.207.73` — the VPS, **grey cloud intact** |
+| Certificate | `CN=*.datakiin.com`, `C=US, O=Let's Encrypt, CN=YE1`, to Dec 1 2026 |
+| VPS → tunnel | 443 OPEN |
+| nginx `upstream timed out` on the VPS | **stops at 15:48:06**; a fresh request at 15:49:09 succeeded with no new error |
+
+📌 **The VPS's nginx error log dates the outage from the outside, for free.** It logged `upstream timed out … 10.10.0.2:443` continuously from 03:41 UTC to 15:48:06 UTC and then stopped dead at the recovery. **A relay that fails loudly is a monitor you already own** — no new tooling needed, and it timestamps both edges of an outage on a box you can always reach.
+
+⏳ **Still to do:** install the unit (`sudo bash setup-labserver-caddy-boot.sh`) and confirm at the next morning's boot that Caddy comes back unaided. Until that is proven on a real boot, this is a fix that has been *written*, not a fix that has *worked*.
 
 ### 📋 ufw rules observed 2026-08-14 that are NOT in the documented six
 
@@ -834,7 +913,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 >    ## 🎉 **PUBLIC PATH LIVE 2026-09-02 — the whole chain works end to end**
 >
->    Caddy deployed with the tunnel publish and PROXY protocol; box and repo byte-identical again (Caddyfile `009cb7b0…`, compose.yml `38b56004…`; backups `*.bak-prevps-20260902`).
+>    Caddy deployed with the tunnel publish and PROXY protocol; box and repo byte-identical again (Caddyfile `10694b9a…`, compose.yml `38b56004…`; backups `*.bak-prevps-20260902`).
+
+> 📌 **Caddyfile hash corrected 2026-09-03.** This line read `009cb7b0…`, which matched nothing — re-checksummed on the box and it is **`10694b9a…`, byte-identical to the repo**, so the `cloud.datakiin.com` handler *is* deployed and there was never any drift. The recorded value was most likely taken before the final comment edit at 11:17. **compose.yml's `38b56004…` was correct.** Worth noting the near-miss: a wrong hash written down as verification is worse than no hash, because the next reader spends the drift investigation on a typo.
 >
 >    | Check | Result |
 >    |---|---|
@@ -903,7 +984,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >    ✅ **The DDNS gap is deleted, not solved.** Every earlier draft needed a dynamic-DNS updater because the record pointed at a residential IP on a changing lease — hence the planned `dg.datakiin.com` indirection. **A Linode address is static.** Write the record once; `dg.datakiin.com` is no longer needed and should be dropped rather than built.
 >
 >    Original authoring note: ✅ **fully authored 2026-09-01 in [`vps/`](vps/)** (`setup-vps.sh`, `setup-labserver-wireguard.sh`, `nginx-stream.conf`, README with the rental spec). Chosen **Linode Nanode 1 GB, Washington DC (`us-iad`)**, ~$5/mo expected, 1 TB traffic, IPv4 included. ⚠️ **Hetzner was recommended twice and dropped:** it is cheap in the EU and not in the US — the only Ashburn plan was **CPX11 at $21.09/mo**, ~3× its EU equivalent. 📌 **Three price figures were quoted in this project from memory and two were flatly wrong** ("$4–5/mo, ~20 TB", then "€11.99/mo, 0.5 TB"). `us-iad` is the same metro as Ashburn, so the Minecraft-latency argument is unchanged. The [`vps/`](vps/) scripts are provider-agnostic — only the firewall step differs. Ashburn is chosen for Minecraft latency: Danny is DC-metro (Cloudflare serves him from `IAD`, his Verizon hop is East Coast). Tunnel subnet **`10.10.0.0/24`**, checked against every subnet in play. Everything public depends on this step.
-> 4. ⛏️ **Migrate Minecraft off Romulus.**
+> 4. ⛏️ **Migrate Minecraft off Romulus.** 🚧 **BLOCKED BY A CONSTRAINT, NOT BY WORK — [labserver is off ~12h every night](#-labserver-is-off-about-12-hours-every-night), Romulus is not.** Migrating public worlds onto it hands strangers a server that dies nightly. Settle the availability question with Danny *before* moving anything; the technical steps are ready and are not the problem.
 >
 > **Open:** `files/` (Syncthing + FileBrowser) is authored but **orphaned** — Syncthing was the wrong tool once the requirement turned out to be many-to-one ingest rather than mirroring. Either delete it or keep FileBrowser alone for renaming uploads into Jellyfin's convention.
 
@@ -959,6 +1040,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - ⚠️ **`host-gateway` resolves to `docker0` — which is DOWN if every stack uses a user-defined network.** `extra_hosts: host.docker.internal:host-gateway` points at the *default* bridge (`172.17.0.1`), not at the network the container is actually on. Here that address belongs to a bridge nothing is attached to. It still works, but only because ufw's rule is **source**-matched and Linux keeps a down interface's address locally routable — a lot of coincidence to rest a family service on. Name the live gateway explicitly. When a proxy 502s, the upstream IP is **in the log**: `dial tcp <IP>` identifies the culprit instantly.
 - **ufw rules match source address + destination PORT, not destination IP.** `allow from 172.20.0.0/14 to any port 8096` permits that source to hit port 8096 on *every* address the host owns — including a different bridge's IP. This is why the proxy works while dialing an interface that is down, and why reading the rule as "allow the edge bridge to reach itself" would be wrong. It also means such a rule is broader than it looks: a `/14` covers every present and future docker bridge.
 - **`i/o timeout` vs `connection refused` tells you firewall-vs-nothing-listening.** A silent DROP (firewall) times out; a closed port answers with RST immediately. The 3.00 s duration in a 502 log line is itself the diagnosis.
+- ⚠️ **"Disproved" is scoped to the incident it was disproved in.** The DHCP-race hypothesis was correctly ruled out for the 2026-09-01 Caddy failure and written down as wrong. Eleven days later the identical symptom had *exactly that* cause, and the earlier note was sitting there ready to talk the next reader out of the right answer. **Record what a hypothesis was ruled out *for*, not just that it was ruled out** — a service can fail the same visible way for unrelated reasons, and the second one does not care what the first one turned out to be.
+- ⚠️ **A container binding a literal host address will lose a race with DHCP at boot, and nothing in the standard ordering saves you.** `network-online.target` sounds like it means "the network is ready." Under ifupdown's `allow-hotplug` + `inet dhcp`, with `systemd-networkd-wait-online` disabled, the target is reached **before the lease lands** — so docker.service's `After=network-online.target` is satisfied and buys nothing. The container dies with `cannot assign requested address`. **Wait on the precondition that actually failed** (the address being present on an interface), not on a target that merely sounds like it. And derive the addresses from the compose file rather than retyping them into the unit, or you have created a second literal to keep in sync.
+- 🔬 **When one of several similar things fails, look for what the survivors do differently — it is often the whole diagnosis.** Three containers came back from the same boot; only Caddy failed. cloudflared and the web nginx **publish no host ports**; Caddy publishes two literal host addresses. That single structural difference turned a plausible bind-race story into a one-for-one correlation with no further work. **Cheaper than reading logs, and it independently confirms them.**
 - 🔁 **A long-running process can start succeeding without restarting, because the fix lived outside it.** Reasoning error made and corrected in one session: Caddy logged a 502, then served 8/8 clean 200s ~80 min later from the *same pid*, so "no restart ⇒ nothing was fixed ⇒ it must be intermittent" — and a whole intermittent-failure theory got written up. Wrong. **A ufw rule was added in between**, changing kernel packet handling with no restart, no reload, and no entry in the application log. Before theorising about an application, ask what changed in the *environment* around it.
 - **Count the occurrences before escalating a log line.** `grep -c 'i/o timeout'` returned **1**. One 502 across the container's entire life is a transient during setup; the same line seen once and assumed recurring produced an urgent "do not ship" recommendation that the evidence never supported. Severity is a frequency question, and it costs one `grep -c` to answer.
 - **Test the cheap hypothesis before writing it down as likely.** "`host.docker.internal` probably resolves to both addresses" was plausible, load-bearing, and settled by a single `getent ahosts` — which returned exactly one address. The command was available the whole time; the theory got written first.
