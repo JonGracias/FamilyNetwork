@@ -33,10 +33,14 @@ say "Per-library detail: TYPE and target paths"
 for d in "$ROOT"/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
-  # CollectionType is the field that decides metadata scraping. Empty/absent
-  # means "Mixed content", which is almost never what you want.
-  ctype=$(grep -ho '<CollectionType>[^<]*' "$d"/options.xml 2>/dev/null | sed 's/.*>//')
-  printf '  %-24s type=%s\n' "$name" "${ctype:-<none/mixed>}"
+  # The collection type decides metadata scraping, and Jellyfin stores it as a
+  # ZERO-BYTE MARKER FILE (movies.collection, tvshows.collection,
+  # homevideos.collection, music.collection) -- NOT as a field in options.xml.
+  # An earlier version of this script grepped options.xml for <CollectionType>
+  # and reported every library as untyped, which was a false negative on all
+  # four. No marker file genuinely does mean "Mixed content".
+  ctype=$(cd "$d" && ls *.collection 2>/dev/null | sed 's/\.collection$//' | paste -sd,)
+  printf '  %-24s type=%s\n' "$name" "${ctype:-<none/mixed -- verify in the dashboard>}"
   for lnk in "$d"*.mblink; do
     [ -e "$lnk" ] || continue
     tgt=$(cat "$lnk" 2>/dev/null)
