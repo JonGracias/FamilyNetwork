@@ -29,6 +29,16 @@ CONTAINER=nextcloud
 DRY_RUN=0
 [ "${1-}" = "--dry-run" ] && DRY_RUN=1
 
+# Under --dry-run nothing is applied, so the closing checks re-read the SAME
+# state as the opening ones. Labelling those "AFTER" made a dry run print
+# "expect 0" against 3, and "STILL NOT WRITABLE", which reads as a failed fix
+# rather than as a preview. Label them for what they are.
+if [ "$DRY_RUN" = 1 ]; then
+  PHASE="UNCHANGED (dry run)"
+else
+  PHASE="AFTER"
+fi
+
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 run() { if [ "$DRY_RUN" = 1 ]; then printf '  [dry-run] %s\n' "$*"; else "$@"; fi; }
 
@@ -78,29 +88,29 @@ else
 fi
 
 # ------------------------------------------------------------------ verify
-say "AFTER -- apache process umask"
+say "$PHASE -- apache process umask"
 docker exec "$CONTAINER" grep -H Umask /proc/1/status 2>/dev/null \
   || echo "  (container not running)"
-echo "  expect Umask: 0002"
+if [ "$DRY_RUN" = 1 ]; then echo "  (still 0022 -- correct, nothing was applied; expect 0002 after a real run)"; else echo "  expect Umask: 0002"; fi
 
-say "AFTER -- directory modes"
+say "$PHASE -- directory modes"
 find "$MEDIA" -type d -printf '%M %u:%G  %p\n' | head -20
-echo "  non-group-writable dirs remaining: $(find "$MEDIA" -type d ! -perm -g=w | wc -l)  (expect 0)"
+n=$(find "$MEDIA" -type d ! -perm -g=w | wc -l); if [ "$DRY_RUN" = 1 ]; then echo "  non-group-writable dirs: $n  (unchanged -- the repair was not run)"; else echo "  non-group-writable dirs remaining: $n  (expect 0)"; fi
 
-say "AFTER -- can jony actually write into an uploaded folder?"
+say "$PHASE -- can jony actually write into an uploaded folder?"
 # The real test. Mode bits are the mechanism; this is the requirement.
 TESTDIR=$(find "$MEDIA" -mindepth 2 -type d | head -1)
 if [ -n "${TESTDIR:-}" ]; then
   if sudo -u jony test -w "$TESTDIR"; then
     echo "  WRITABLE by jony: $TESTDIR"
   else
-    echo "  !! STILL NOT WRITABLE by jony: $TESTDIR"
+    if [ "$DRY_RUN" = 1 ]; then echo "  not yet writable by jony: $TESTDIR  (expected -- dry run)"; else echo "  !! STILL NOT WRITABLE by jony: $TESTDIR"; fi
   fi
 else
   echo "  (no nested directory to test yet)"
 fi
 
-say "AFTER -- Nextcloud still serving?"
+say "$PHASE -- Nextcloud still serving?"
 docker ps --filter "name=^${CONTAINER}$" --format '  {{.Names}}  {{.Status}}'
 
 cat <<'NEXT'
