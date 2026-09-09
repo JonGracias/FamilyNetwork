@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup-labserver-nextcloud-media.sh
 #
-# Wires the three media folders into Nextcloud as External Storage (Local)
+# Wires the media ingest folders into Nextcloud as External Storage (Local)
 # mounts, so uploads land as REAL FILES WITH REAL NAMES on the bind-mounted
 # tree that Jellyfin reads.
 #
@@ -36,7 +36,7 @@ NC_UID=33
 MEDIA_GROUP="jony"
 
 # mount point (what contributors see) | container path | Jellyfin library
-# Mount points are lower-case to match the three that already exist live.
+# Mount points are lower-case to match the ones already live on the box.
 MOUNTS="
 movies|/media/movies|Movies
 home-videos|/media/home-videos|Home Videos and Photos
@@ -106,7 +106,7 @@ say "Enabling files_external"
 run docker exec -u www-data "$CONTAINER" php occ app:enable files_external
 
 # ------------------------------------------------------------------ create
-say "Creating the three Local mounts"
+say "Creating the Local mounts"
 existing=$(occ files_external:list --output=json 2>/dev/null \
   | python3 -c '
 import json,sys
