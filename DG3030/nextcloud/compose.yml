@@ -17,6 +17,29 @@ services:
     container_name: nextcloud
     restart: unless-stopped
     depends_on: [db, redis]
+
+    # ---- umask 0002, so Jon can still do the renaming chore over SSH ----
+    # Nextcloud creates directories with mkdir(0777) and files with 0666, both
+    # masked by the PROCESS umask. The image inherits Docker's default 022, so
+    # every folder an upload creates arrives drwxr-sr-x (2755): group jony, but
+    # NOT group-writable. Renaming a file needs write on its PARENT DIRECTORY,
+    # so that silently blocks the documented SSH workflow inside exactly the
+    # folders that hold the content -- while the top-level mounts, chmod'd 2775
+    # by hand, keep looking correct.
+    #
+    # setgid on the parent propagates the GROUP and never the MODE, which is
+    # why the one-time chmod did not cover this and never could.
+    #
+    # 0002 gives dirs 0775 and files 0664. Jellyfin is unaffected: it is uid 101
+    # and not in group jony, so it reads through the other-bits, which stay r-x
+    # on dirs and r on files.
+    #
+    # This runs AFTER the image entrypoint (which does the install/upgrade work
+    # as root with the default umask, deliberately untouched) because compose's
+    # `command` replaces only the "$@" the entrypoint execs at the end.
+    # `exec` matters: it keeps apache as pid 1 so signals still reach it.
+    command: ["sh", "-c", "umask 0002 && exec apache2-foreground"]
+
     # NO "ports:" -- deliberately. This publishes nothing on the host. Caddy
     # reaches it by container name over the shared "edge" network, so there is
     # no host socket to accidentally expose and no ufw rule to get wrong.

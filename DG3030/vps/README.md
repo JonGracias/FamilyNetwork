@@ -182,6 +182,12 @@ project.
   and applies no bitrate cap, and Nextcloud counts all failed logins against
   one address until it locks out the internet.
 
+- **mc-router's file reload only adds.** `-routes-config-watch` picks up a new route
+  the moment `routes.json` changes but keeps one the file dropped until a restart - and a
+  restart drops every player. `install-mc-router-sync.sh` (after `install-mc-router.sh`)
+  adds a path unit that runs `mc-router-sync` on every change, deleting stale routes
+  through mc-router's local API (`127.0.0.1:8734`). Installed and proven 2026-10-07.
+
 ## After it's up
 
 🚨 **Re-run the isolation test.** Nothing here opens an inbound rule at

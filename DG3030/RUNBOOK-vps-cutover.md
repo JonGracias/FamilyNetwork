@@ -299,10 +299,12 @@ be; it sits unused in the `caddy_data` volume and costs nothing.
 
 In rough priority order — none of it blocks the above:
 
-1. **Deploy Nextcloud** — [`nextcloud/`](nextcloud/) is authored, not deployed.
-   The Caddyfile already routes `cloud.datakiin.com` to it, so that hostname
-   will 502 until the stack is up. Needs its own DNS record, same shape as
-   Step 6.
+1. ~~**Deploy Nextcloud**~~ ✅ **DONE 2026-09-03**, verified again 09-08:
+   `cloud.datakiin.com` returns `302 → /login → 200` from outside, resolving to
+   the VPS with the grey cloud intact. All four External Storage mounts exist
+   and verify `ok`. ⏳ The remaining half is on **Jellyfin** — its libraries
+   still point only at Danny's `/mnt/media/Media/*` and need the ingest paths
+   added. See [`nextcloud/README.md`](nextcloud/README.md).
 2. **Migrate Minecraft off Romulus**, then add mc-router on the VPS for TCP
    25565 and the voice UDP range — plus the matching Cloud Firewall rules
    (`25565/tcp`, `24454-24473/udp`), which are deliberately not open yet.

@@ -19,11 +19,38 @@ Same hat as FamilyNetwork: a seasoned IT technician (CompTIA A+/Network+), **dia
 | Machine   | Address | Where | OS / notes |
 |-----------|---------|-------|------------|
 | Romulus   | `100.118.236.2` (TS) | Jon's house | Admin workstation → **dev machine only** going forward. Tailscale as `jon.gracias@`. Holds SSH keypair `jon@romulus`. |
-| labserver | **`100.86.218.41` (TS)** · LAN `192.168.50.10` | **Danny's house** | **The workhorse.** Debian 13 (trixie). ASUS PRIME Z490-A, **i7-10700 (8C/16T)**, **62 GB RAM** + 49 GB swap, **RTX 3060 12 GB**. ~3.7 TB free. Owned by `DG3030@`, FQDN `labserver.tail663992.ts.net`. Runs **Jellyfin** (8096) + **Samba**. Login `jony`, key auth, password-required sudo. |
+| labserver | **`100.86.218.41` (TS)** · LAN `192.168.50.10` | **Danny's house** | **The workhorse.** Debian 13 (trixie). ASUS PRIME Z490-A, **i7-10700 (8C/16T)**, **62 GB RAM** + 49 GB swap, **RTX 3060 12 GB**. ~3.7 TB free. Owned by `DG3030@`, FQDN `labserver.tail663992.ts.net`. Runs **Jellyfin** (8096) + **Samba**. Login `jony`, key auth, password-required sudo. ⏰ **Danny powers it OFF overnight — see [Nightly shutdown](#-labserver-is-off-about-12-hours-every-night).** |
 | FortiGate 40F | `192.168.50.1` | Danny's house | 🆕 **The gate.** Installed by Danny 2026-08-13. 5× GbE, no Wi-Fi radio. labserver now sits behind it, isolated from the house LAN. |
 | **datakiin-relay** | **`172.233.207.73`** · tunnel `10.10.0.1` | Linode `us-iad` | 🆕 **The public door.** Rented 2026-09-02. Nanode 1 GB, Debian 13, $5/mo. Stateless relay — **terminates no TLS, holds no cert, stores no data.** SSH alias `vps`, root + key only. Rebuildable from [`vps/setup-vps.sh`](vps/setup-vps.sh). |
 | Ryzen mini (K11) | — | — | ❌ **SCRAPPED.** labserver's 62 GB RAM + RTX 3060 host everything. Not needed, not planned. |
 | Storage | on labserver | Danny's house | **Nothing to buy** — ~3.7 TB free across 3× NVMe + a 2 TB HDD, plus Jon's dedicated 4 TB at `/srv/datakiin`. |
+
+## ⏰ labserver is OFF about 12 hours every night
+
+**Danny powers the machine down overnight so he can sleep.** It is his house and his machine; this is not negotiable infrastructure, it is a housemate's bedroom. Every design decision in this document has to live with it.
+
+**Measured 2026-09-03** from 21 days of `logs/labserver-logins.csv` (hourly poll, so each edge is accurate to the hour):
+
+| Off | Back | Down |
+|---|---|---|
+| 2026-08-29 21:05 | 08-30 09:05 | 12h |
+| 2026-08-30 21:05 | 08-31 08:05 | 11h |
+| 2026-08-31 21:05 | 09-01 09:46 | 12.7h |
+| 2026-09-01 21:05 | 09-02 09:38 | 12.5h |
+| 2026-09-02 23:37 | 09-03 (pending) | — |
+
+**Roughly 21:00 → 09:00, about half of every day.** The pattern is present in the *first* row of the watcher log (2026-08-13) and has held continuously since, so it is the steady state and always has been — it simply went unrecorded for three weeks while this document accumulated detail down to SATA port numbers.
+
+⚠️ **What this means, and it is not small:**
+
+- 🎬 **`watch.datakiin.com` is down every night, during exactly the hours people watch television.** This is the single largest practical limitation on the media build, larger than bandwidth or the NVENC session cap — those degrade quality, this removes the service. **Tell the family the window before handing anyone the URL**, or the first thing they learn about Jellyfin is that it is unreliable.
+- ⛏️ **It collides head-on with migrating Minecraft off Romulus** (roadmap item 4). Romulus runs 24/7; labserver does not. Moving 11 public worlds onto it means the game door dies nightly for *strangers on the internet* — a regression the migration would introduce, and one no amount of VPS relay fixes, because the relay is healthy and the backend is off. **Resolve this before the migration, not during it.**
+- 🌙 **Nothing scheduled overnight ever runs** — `unattended-upgrades`, any cron, and any future backup job. If off-box backups get built (currently deprioritised), they must be scheduled inside the waking window.
+- 🔔 **Do NOT add "unreachable" alerting to [`watch-labserver-logins.ps1`](watch-labserver-logins.ps1).** It would fire every single night. This was proposed on 2026-09-03 and correctly rejected — the watcher logging `UNREACHABLE` overnight is the system working.
+
+📌 **Diagnostic consequence: on this box, "down" is the null hypothesis, not the alarm.** A morning finding of no SSH, a stale WireGuard handshake, Tailscale reporting `offline`, and Cloudflare `530` on `lab.datakiin.com` is the *expected* overnight reading — four signals agreeing, all correct, meaning nothing. **Check the clock against this window before opening an investigation.** Same family of error as `ping` after a firewall change: the measurement is right and the inference is wrong.
+
+**Options if 24/7 is ever genuinely needed** — none taken, all require asking Danny: Wake-on-LAN triggered from the VPS, a scheduled BIOS wake, or relocating the machine somewhere it can run without disturbing anyone. Ask before assuming any of them are acceptable; the constraint is a person's sleep, not a config flag.
 
 ## Access
 
@@ -35,7 +62,7 @@ Same hat as FamilyNetwork: a seasoned IT technician (CompTIA A+/Network+), **dia
 - [`setup-labserver-access.sh`](setup-labserver-access.sh) — the script that established access. Run **on labserver** by a sudo user (`bash setup-labserver-access.sh [user]`, defaults to `jony`). Disables Tailscale SSH, appends Romulus's key to `~/.ssh/authorized_keys`, fixes `700`/`600` modes. Idempotent.
 - Tailscale CLI on Romulus: `C:\Program Files\Tailscale\tailscale.exe` (not on PATH).
 - MagicDNS short name `labserver` did not resolve from Romulus (2026-08-10) — use the IP or FQDN.
-- ⏳ **TODO:** `~/.ssh/config` alias `labserver` → `HostName 100.86.218.41`, `User jony`.
+- ✅ **DONE 2026-09-02:** `~/.ssh/config` on Romulus has the `labserver` alias (`HostName 100.86.218.41`, `User jony`), alongside `vps`. Backups at `~/.ssh/config.bak-prevps-20260902`. *(This read `⏳ TODO` until 2026-09-08 while the alias had worked for six days — the status section recorded it and this section was never updated.)*
 
 ## 🚨 Karla's isolation requirement — the hard constraint
 
@@ -358,6 +385,60 @@ cd /srv/datakiin/stacks/caddy && sudo docker compose up -d --force-recreate
 2. **Used `strtonum()` in an awk one-liner.** That is a **gawk** extension; Debian ships **mawk**, which errors out and prints nothing — which read as "the state changed" rather than "my parser broke." A second, differently-written probe minutes earlier had worked. **When output changes and the system did not, suspect the tool.**
 
 Also disproved: the first hypothesis was a DHCP race — Docker binding `192.168.50.10:443` before the interface had its address. Plausible, wrong, and it survived only until the logs were read. **The logs named the actual failure in their first line.**
+
+> ⚠️ **Read the 2026-09-03 incident below before reusing that conclusion.** The DHCP race was correctly ruled out *for this incident*. It is the confirmed cause of the **next** one. Same service, same symptom, two different root causes eleven days apart — "disproved" meant disproved on 09-01, not disproved in general.
+
+### 🔴 INCIDENT 2026-09-03 — Caddy did not come back from the nightly reboot, and this time it IS the DHCP race
+
+Found while checking state on a normal morning. labserver was healthy and up since 08:27; `lab.datakiin.com` served 200; the WireGuard tunnel was clean at 0% loss / 5.77 ms — and **`watch.datakiin.com` was dead** with neither of Caddy's listeners present. The container's own state named the cause:
+
+```
+Exited (255)
+err=failed to set up container networking: driver failed programming external
+    connectivity on endpoint caddy: failed to bind host port
+    192.168.50.10:443/tcp: cannot assign requested address
+finished=2026-09-03T12:27:17Z          <- 08:27 EDT, i.e. boot
+```
+
+**Mechanism, measured rather than assumed:**
+
+| Fact | Consequence |
+|---|---|
+| `compose.yml` publishes two **literal** addresses (`192.168.50.10:443`, `10.10.0.2:443`) | those addresses must exist *before* dockerd starts the container |
+| `/etc/network/interfaces`: `allow-hotplug enp2s0f0` + `iface … inet dhcp` | the lease is acquired **asynchronously, after `networking.service` returns** |
+| `systemd-networkd-wait-online` is **disabled** | `network-online.target` is reached **without anything waiting for a routable address** |
+| docker.service's `After=network-online.target` | therefore satisfied trivially, and buys nothing |
+
+🎯 **The corroboration is a clean natural experiment, not a story:** `cloudflared` and the `web` nginx **publish no host ports** and both returned from the same boot without a scratch. **The only container that failed is the only one that binds a host address.** One-for-one.
+
+📌 **The literal binds are still correct and must stay.** Publishing `0.0.0.0:443` would fix the race and simultaneously expose the proxy to every tailnet node, which is the thing the bind-address convention exists to prevent. The race is the *cost* of a correct decision, so it gets paid properly rather than reversed.
+
+🚨 **Why this is not a footnote: [the box reboots every single night](#-labserver-is-off-about-12-hours-every-night).** "Does it survive a reboot" is this machine's daily operating mode, not a corner case. Two of two observed reboots left Caddy down — so the family's media door has been coming up broken every morning and being fixed by hand as a side effect of whatever work happened that day. The 2026-09-02 "public path live" verification does not contradict this: it ran *after* the cutover had already recreated the container.
+
+✅ **Fixed by [`setup-labserver-caddy-boot.sh`](setup-labserver-caddy-boot.sh)** — installs a systemd oneshot (`datakiin-caddy.service`) that waits for every address `compose.yml` publishes to actually appear on the host, then runs `docker compose up -d --force-recreate`.
+
+- **The addresses are parsed out of `compose.yml`, never written into the unit.** This document's own recurring lesson is that a control expressed as a literal address is only as durable as the network it names — the ufw rules left pointing at a dead `10.0.0.0/24`, the FortiGate policy written against a subnet that stopped existing. Re-point the stack and the waiter follows with no edit. Verified: the parse yields exactly `10.10.0.2` and `192.168.50.10`, both matching the host's `ip -4 -o addr` output verbatim.
+- **`--force-recreate`, not `up -d`** — chosen so the unit also repairs the *2026-09-01* failure mode, where the container started but attached to no network at all. One unit, both known reboot failures.
+- It waits on the **precondition that actually failed** (the addresses being assigned) rather than on `network-online.target`, which is demonstrably not a proxy for it on this box.
+
+✅ **Service restored and verified 2026-09-03 15:48 UTC** with `docker compose up -d --force-recreate` (*not* `restart` — see the 09-01 lesson):
+
+| Check | Result |
+|---|---|
+| Caddy listeners | **`192.168.50.10:443` + `10.10.0.2:443`**, TCP only |
+| Container network | **`lo` + `eth0`** — properly attached, unlike 09-01 |
+| veth count | **3** — all three containers |
+| **Outside-in from Romulus**, real DNS, no `--resolve` | **`http=302 verify=0`**, `connect=0.051s total=0.165s` |
+| Resolves to | `172.233.207.73` — the VPS, **grey cloud intact** |
+| Certificate | `CN=*.datakiin.com`, `C=US, O=Let's Encrypt, CN=YE1`, to Dec 1 2026 |
+| VPS → tunnel | 443 OPEN |
+| nginx `upstream timed out` on the VPS | **stops at 15:48:06**; a fresh request at 15:49:09 succeeded with no new error |
+
+📌 **The VPS's nginx error log dates the outage from the outside, for free.** It logged `upstream timed out … 10.10.0.2:443` continuously from 03:41 UTC to 15:48:06 UTC and then stopped dead at the recovery. **A relay that fails loudly is a monitor you already own** — no new tooling needed, and it timestamps both edges of an outage on a box you can always reach.
+
+✅ **PROVEN ON A REAL BOOT 2026-09-08.** The unit is installed (`/etc/systemd/system/datakiin-caddy.service`, written 09-03 11:51), **enabled and active**, and the box had been up 2h24m from an unattended 07:26 EDT boot with **both** Caddy listeners already present — `192.168.50.10:443` and `10.10.0.2:443` — with nothing fixed by hand that morning. `watch.datakiin.com` and `cloud.datakiin.com` both answered `302` from Romulus over real DNS.
+
+📌 **This is the item graduating from *written* to *worked*.** Two of two previously-observed reboots had left Caddy down, so the family's media door had been coming up broken every morning; this is the first confirmed morning it came back unaided. The fix waits on **the addresses `compose.yml` publishes actually appearing on the host**, not on `network-online.target` — which this box reaches before the DHCP lease lands, which is why the standard ordering bought nothing.
 
 ### 📋 ufw rules observed 2026-08-14 that are NOT in the documented six
 
@@ -729,11 +810,12 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 
 - **Drive provenance:** used Seagate ST4000NM0085 enterprise pull (SN ZC1DHDEG). SMART at setup: **0 reallocated / 0 pending / 0 uncorrectable / 0 CRC** but **46,812 power-on hours (~5.3 yrs)**, G-Sense 34,401. Fine for working data, **never the sole copy**. Stale `ufs` signature wiped with `wipefs` before mkfs. 4Kn sectors.
 - ✅ **Long self-test PASSED 2026-08-11** — `Extended offline / Completed without error`, full 4 TB surface read, zero read errors. Health quartet (5/197/198/199) all zero as of 2026-08-12. Thermal curve in smartd's attrlog corroborates the full ~8 h window. **Caveat stands:** media proven good, but 5.3 years of power-on hours is the risk — never the sole copy.
-- **Layout:** `stacks/` (compose per service, **authored not deployed**), `projects/` (linenlady, minecraftserver), `data/` (bind-mount volumes), `backups/`, `docs/`, `bin/health.sh`, `secrets/` (0700, gitignored).
+- **Layout:** `stacks/` (compose per service), `projects/` (linenlady, minecraftserver), `data/` (bind-mount volumes), `backups/`, `docs/`, `bin/health.sh`, `secrets/` (0700, gitignored). 📌 **`stacks/` read "authored not deployed" until 2026-09-08 and that is no longer true of half of it** — `caddy`, `web`, `cloudflared` and `nextcloud` are **deployed and running**; `immich`, `jellyfin` and `ollama` remain authored only. (The `jellyfin` stack should probably stay that way — Danny's native install is the live one, and containerising it needs `nvidia-container-toolkit` first.)
 - **Stacks staged:** cloudflared, ollama (+open-webui), jellyfin, immich, nextcloud — all loopback-bound by default; nothing started.
-- 🆕 **[`nextcloud/`](nextcloud/) — authored 2026-09-01, NOT deployed.** The real movie/home-video ingest stack, replacing the scaffold placeholder (which was MariaDB, no Redis, no media path, no proxy config). Postgres 16 + Redis + `nextcloud:30-apache`. **Publishes no host port** — Caddy reaches it by container name over `edge`. Redis is not optional here: without it Nextcloud falls back to database file locking, which throws spurious "file is locked" errors under exactly the big concurrent uploads this exists for. Bind-mounts `/srv/datakiin/data/media` so uploads land as **real files with real names** via External Storage; Nextcloud's internal object store would be invisible to Jellyfin.
-  - **Three Jellyfin libraries, because the library TYPE decides behaviour:** `media/movies` → type **Movies** (scrapes TMDB, needs `Title (Year)/Title (Year).mkv`, `[imdbid-tt...]` to pin a wrong match), `media/home-videos` → type **Home Videos & Photos** (no scraping), and 🆕 `media/music` → type **Music**. Family footage in a Movies library fails to match and displays as a mess; a real film in a Home Videos library gets no metadata at all. ⚠️ **Uploads do not arrive correctly named — renaming is the real ongoing chore**, not the transfer.
-  - 🎵 **Music, added 2026-09-02 — Jose wants to replace Spotify with music he already owns.** Three things make it unlike the video libraries. **(1) It is effectively free on the VPS link:** FLAC is ~0.45 GB/hour against 3.6 for 1080p video, so four hours a day every day is ~54 GB/month — about 5% of the 1 TB. Video is the only thing that can exhaust the quota. **(2) Audio transcoding uses the CPU, never NVENC**, so music cannot compete with anyone watching a film, and the 10–12 Mbps remote cap sits ~10× above any audio bitrate — one policy covers both. **(3) ⚠️ Tags, not paths, decide the result.** Jellyfin parses the *path* for films but reads embedded **ID3/Vorbis tags** for music, so a collection accumulated over years needs a **MusicBrainz Picard** pass *before* import. 📱 **Use Finamp, not the Jellyfin app** — the main client is built around video; Finamp's **offline downloads** are also the real bandwidth lever, since an album pulled once over Wi-Fi costs nothing thereafter. ⚠️ **Set expectations: this replaces Spotify's library, not its discovery** — no recommendations, no new releases he does not already own. Full detail in [`nextcloud/README.md`](nextcloud/README.md).
+- ✅ **[`nextcloud/`](nextcloud/) — DEPLOYED 2026-09-03, live and verified 2026-09-08** (`30.0.17`, box byte-identical to the repo). The real movie/home-video ingest stack, replacing the scaffold placeholder (which was MariaDB, no Redis, no media path, no proxy config). Postgres 16 + Redis + `nextcloud:30-apache`. **Publishes no host port** — Caddy reaches it by container name over `edge`. Redis is not optional here: without it Nextcloud falls back to database file locking, which throws spurious "file is locked" errors under exactly the big concurrent uploads this exists for. Bind-mounts `/srv/datakiin/data/media` so uploads land as **real files with real names** via External Storage; Nextcloud's internal object store would be invisible to Jellyfin.
+  - **FOUR ingest categories, because the library TYPE decides behaviour** (was three until `shows` was added 2026-09-08): `media/movies` → type **Movies** (scrapes TMDB, needs `Title (Year)/Title (Year).mkv`, `[imdbid-tt...]` to pin a wrong match), `media/home-videos` → **Home Videos & Photos** (no scraping), `media/music` → **Music**, `media/shows` → **Shows** (`tvshows`; needs `Series (Year)/Season NN/Series - SNNENN.mkv`). Family footage in a Movies library fails to match and displays as a mess; a real film in a Home Videos library gets no metadata at all. ⚠️ **Uploads do not arrive correctly named — renaming is the real ongoing chore**, not the transfer.
+  - ✅ **All four exist as Nextcloud External Storage mounts and all four verify `ok`** (ids 1–4, applicable to All, `filesystem_check_changes=1`). ⏳ **The Jellyfin half is the outstanding work** — see "THE REAL GAP" in the status section: Jellyfin's libraries still point only at Danny's `/mnt/media/Media/*` and not at this tree.
+  - 🎵 **Music, added 2026-09-02 — Jose wants to replace Spotify with music he already owns.** Three things make it unlike the video libraries. **(1) It is effectively free on the VPS link:** FLAC is ~0.45 GB/hour against 3.6 for 1080p video, so four hours a day every day is ~54 GB/month — about 5% of the 1 TB. Video is the only thing that can exhaust the quota. **(2) Audio transcoding uses the CPU, never NVENC**, so music cannot compete with anyone watching a film, and the 10–12 Mbps remote cap sits ~10× above any audio bitrate — one policy covers both. **(3) ⚠️ Tags, not paths, decide the result.** Jellyfin parses the *path* for films but reads embedded **ID3/Vorbis tags** for music, so a collection accumulated over years needs a **MusicBrainz Picard** pass *before* import. 📱 **Use Finamp, not the Jellyfin app** — the main client is built around video; Finamp's **offline downloads** are also the real bandwidth lever, since an album pulled once over Wi-Fi costs nothing thereafter. ⚠️ **Set expectations: this replaces Spotify's library, not its discovery** — no recommendations, no new releases he does not already own. ✅ **Ingest decided 2026-09-02: Jose is REMOTE**, so Samba is unavailable to him and Nextcloud is his path — **sneakernet for the initial bulk load, Nextcloud web UI for every addition after.** Ten songs is ~100 MB (MP3) or ~350 MB (FLAC): under a minute to a few minutes, and negligible against the quota. 🚚 The open question is *delivery* — "carry a drive over" assumes proximity a remote contributor lacks, so it means mailing a drive or waiting for a visit; if neither works, upload over the network but **split it across two billing months**. ⚠️ **Do not point the Nextcloud desktop sync client at the music folder** — sync is bidirectional and would pull the whole library back down, the same mirroring trap that got Syncthing rejected. Full detail in [`nextcloud/README.md`](nextcloud/README.md).
   - Added to Danny's **existing** Jellyfin as new libraries. `/mnt/media` is owned by `deks` and `jony` **cannot write there**; these live on Jon's own drive instead, which is the writable half of the arrangement.
 - 🗑️ **`files/` (Syncthing + FileBrowser) — DELETED 2026-09-01.** Authored and removed the same day: Syncthing mirrors rather than uploads, so it was the wrong shape once the requirement turned out to be many-to-one ingest. FileBrowser went with it because Nextcloud's own web UI already does the renaming it would have been kept for. See the tool-fit lesson.
 - 🔐 **Wildcard cert decision (2026-09-01).** The repo Caddyfile now issues one **`*.datakiin.com`** instead of one cert per hostname, because **every certificate a public CA issues is published to Certificate Transparency logs** — so issuing for `cloud.datakiin.com` announces that hostname worldwide within seconds, with no DNS record and no reachability needed. A wildcard shows only `*.datakiin.com`. Only possible because issuance is DNS-01; HTTP-01 cannot do wildcards. ⚠️ **Add new services as a matcher + `handle` block inside that site**, never as a new top-level block, or Caddy issues a separate cert and publishes the name anyway.
@@ -803,7 +885,168 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 > **Order of work:**
 > 1. ~~Recover Caddy~~ ✅ **DONE 2026-09-01** — see the incident below.
-> 2. 🟡 **Deploy Nextcloud + the wildcard Caddyfile together** — authored in [`nextcloud/`](nextcloud/), not deployed. ⚠️ **The repo Caddyfile is deliberately ahead of the box** (repo `a5575a0b…`, box `0e3598de…`): the box still serves the single-site version. Pushing it **issues a fresh `*.datakiin.com` certificate**, so do it on purpose, alongside Nextcloud, not as a side effect.
+> 2. ✅ **DEPLOYED 2026-09-03 — `https://cloud.datakiin.com` is live.** *(Superseded note: "authored, not deployed; the repo Caddyfile is ahead of the box" — the Caddyfile turned out to have been deployed since 09-02, and the recorded drift was a mis-transcribed hash. See the correction above.)*
+>
+>    The box was still running the **Aug 11 scaffold placeholder** (MariaDB, no Redis, no media path, `127.0.0.1:8081` published). Replaced with the authored stack, byte-identical to the repo (`244c3cac…`); placeholder kept at `compose.yml.bak-placeholder-20260903`.
+>
+>    | Check | Result |
+>    |---|---|
+>    | Containers | `nextcloud` (30-apache), `nextcloud-db` (postgres:16), `nextcloud-redis` — all Up |
+>    | Published host ports | **none**, by design — Caddy reaches it by container name over `edge` |
+>    | **Outside-in from Romulus**, real DNS | **`302 → /login → 200`**, `total=0.41s` |
+>    | Resolves to | `172.233.207.73` — the VPS. **Grey cloud confirmed by measurement**, not by reading the dashboard |
+>    | Certificate | `CN=*.datakiin.com`, `notBefore Sep 2 14:08:10` — **the same cert as `watch`** |
+>    | Trusted domains | proven by the login page rendering; a mismatch shows Nextcloud's "untrusted domain" page instead |
+>
+>    🔓 **Adding this hostname published nothing to Certificate Transparency.** No reissue, no ACME round-trip, same `notBefore` as the day before — because the wildcard already covered it. This is the wildcard decision delivering the exact benefit it was chosen for, and it is worth checking the `notBefore` rather than assuming: a new cert would mean the name had just been announced worldwide.
+>
+>    📌 **Grey cloud matters here for a *different* reason than it does for Jellyfin.** For `watch` it is the video terms-of-service risk; for `cloud` it is that **Cloudflare terminates TLS at its edge and can read everything crossing it** — disqualifying for private family files. Same toggle, two independent reasons, and the dashboard defaults to the wrong one.
+>
+>    ⚠️ **Media-tree permissions are load-bearing and were set deliberately:** `chown -R 33:jony` + `chmod -R 2775` on `/srv/datakiin/data/media`. Nextcloud runs as `www-data` (**uid 33**) inside the container so it must own the tree to write uploads; group `jony` with group-write is what lets Jon do the renaming chore; **setgid** makes new subfolders inherit the group; and files land `0644` so Jellyfin reads them without needing group membership. Verified: `drwxrwsr-x www-data jony`. Get any one of those three wrong and either uploads fail, renaming fails, or playback fails — each looking like a different bug.
+>
+>    ✅ **The three External Storage mounts ARE DONE — found 2026-09-08, built ~09-04 and never written down.** This item read "not yet done" for five days while the work was already finished.
+>
+>    | Mount ID | Point | Storage | datadir | Applicable | `verify` |
+>    |---|---|---|---|---|---|
+>    | 1 | `/movies` | Local | `/media/movies` | **All** | `status: ok` |
+>    | 2 | `/home-videos` | Local | `/media/home-videos` | **All** | `status: ok` |
+>    | 3 | `/music` | Local | `/media/music` | **All** | `status: ok` |
+>
+>    👥 **Three Nextcloud accounts also exist, likewise unrecorded:** `Daniel` (display "Danny"), `jon` ("Jony"), `Jose`. Worth noting this contradicts the "family user accounts are deprioritised" line under next-session priorities — they were made anyway. Danny having an account is harmless but still unnecessary: he is on the LAN with a writable Samba share and should not be migrated onto Nextcloud.
+>
+>    ### ✅ State re-verified 2026-09-08 — the stack is healthy; the only gap is on the Jellyfin side
+>
+>    | Check | Result |
+>    |---|---|
+>    | Nextcloud | **installed, not in maintenance mode, `30.0.17`** (`status.php`) |
+>    | `compose.yml` box vs repo | ✅ **byte-identical** — `244c3cac…` both sides |
+>    | Media tree | all three dirs exist, `drwxrwsr-x www-data jony` (setgid intact), **0 files** |
+>    | Postgres | live — `data/nextcloud/db` written 09-08 07:25, i.e. after this morning's boot |
+>    | `cloud` / `watch` outside-in | **`302`** each, `remote_ip=172.233.207.73` — the VPS, **grey cloud still intact** |
+>    | `lab.datakiin.com` | `200` via Cloudflare anycast — the tunnel, correctly a different path |
+>    | **Jellyfin read access to the tree** | ✅ **verified by permission walk** — `/`, `/srv`, `/srv/datakiin`, `/srv/datakiin/data` and all three media dirs are `o+x`, and uploads land `0644`. `jellyfin` is **uid 101, not in group `jony`**, so it reads entirely through the other-bits. |
+>
+>    🟡 **`.env`'s admin password is stale — documentation drift, NOT an access problem.** `NC_ADMIN_USER=jon` with the `.env` password returns **`401`** on `/ocs/v2.php/cloud/user`, on WebDAV, and on capabilities. Not a paste artifact: the values were shape-checked on the box (user 3 chars, password 32 chars, no CR, no space, no colon) and are clean. `config/autoconfig.php` is the **stock template with no admin keys**, so the install took its credentials from the environment and the password was changed *afterwards*.
+>
+>    📌 **Initially written up here as a blocker; that was wrong and the `occ user:list` output is what corrected it.** `jon` exists, so this was never a wrong-username problem, and the same 09-04 session that changed the password also created two user accounts and all three mounts — i.e. **Jon has working admin access and always did.** The only casualty is `.env`, which now reads like a live credential and is not one. Fix by pruning the stale key; the real password belongs in a password manager.
+>
+>    ⏳ **The fix is to prune the stale key from `.env`**, not to reset anything — Jon knows the live password and uses the web UI with it. Keep the real value in a password manager; `.env` is where the last one drifted out of sync, so putting a fresh one back there would repeat the mistake.
+>
+>    ⚠️ **Everything on this box that answers a real question needs root, and `jony` is password-sudo.** `docker` is unreachable (`permission denied … docker.sock`), `config.php` is `0640 www-data`, `html/data` is `0770 www-data`, `/var/lib/jellyfin` is `0750 jellyfin:adm`. The mount question was therefore **unknown from our side, not confirmed absent** — and it resolved the opposite way to what the empty media tree suggested. **An empty data directory is not evidence that the plumbing above it is missing.**
+>
+>    🟡 **`Options` is empty on all three mounts**, so `filesystem_check_changes` is unset (default `0` = never rescan). Jon renames uploads into Jellyfin's convention from *outside* Nextcloud, over SSH — with this at `0`, Nextcloud keeps serving its cached listing and those renames stay invisible in the web UI. Setting it to `1` costs a stat per direct access, which is nothing at media-library scale.
+>
+>    ✅ **DONE and CONFIRMED 2026-09-08 — but only the JSON could confirm it.** All three mounts read `"options":{"enable_sharing":false,"filesystem_check_changes":1}`.
+>
+>    📌 **The ASCII table renders an empty `Options` column even when options are set.** `files_external:list` showed the identical blank column before and after the write, which read as "the command silently did nothing" — the write had in fact landed both times. Only `--output=json` distinguishes "not set" from "not displayed", and it is the view to trust for this command. The claim was deliberately withheld until then, which was the right call for the wrong-looking reason: the evidence genuinely was ambiguous, and it resolved favourably.
+>
+>    ℹ️ `enable_sharing: false` on all three is the default and is correct here — an ingest point does not want contributors minting public share links out of the family's media.
+>
+>    ## 🔴 **THE REAL GAP, found 2026-09-08 — Jellyfin does not point at the ingest tree at all**
+>
+>    Every Jellyfin library targets **`/mnt/media/Media/*` — Danny's drive**. Not one of them references `/srv/datakiin/data/media/*`, the tree Nextcloud writes into. **The ingest path is plumbed to nowhere:** an upload lands correctly, with correct permissions, on a directory Jellyfin has never been told about.
+>
+>    | Jellyfin library | Target | Files |
+>    |---|---|---|
+>    | Movies | `/mnt/media/Media/Movies` | 1 |
+>    | Home Videos and Photos | `/mnt/media/Media/Photos` | 0 |
+>    | Music | `/mnt/media/Media/Music` | 0 |
+>    | Shows | `/mnt/media/Media/TV` | 0 |
+>
+>    📌 **This is why "the mounts exist and verify ok" was never sufficient.** Both halves were individually correct and verified — Nextcloud writes to a real directory, Jellyfin reads real directories — and they were pointed at different places. **Verifying each end of a pipeline separately does not verify the pipeline**, and every check run so far would have passed regardless.
+>
+>    ✅ **The fix is additive: add each ingest path as a SECOND folder on the existing library**, not as a new library. Jellyfin libraries accept multiple paths, so `Movies` gets both `/mnt/media/Media/Movies` and `/srv/datakiin/data/media/movies` and presents one merged view. Creating parallel libraries instead would leave two "Movies" entries in the UI, which is how this gets confusing for the family later.
+>
+>    | Existing library | Add this path |
+>    |---|---|
+>    | Movies | `/srv/datakiin/data/media/movies` |
+>    | Home Videos and Photos | `/srv/datakiin/data/media/home-videos` |
+>    | Music | `/srv/datakiin/data/media/music` |
+>
+>    ⚠️ **This edits Danny's Jellyfin.** Adding a folder is additive and trivially reversible, and Jon holds admin deliberately — but it is the same "propose, do not edit unilaterally" territory as Samba. Worth a message rather than a surprise. Low stakes right now: the entire server holds **one media file**.
+>
+>    ### ✅ Library types are CORRECT — and the probe that said otherwise was wrong
+>
+>    🎯 **Jellyfin stores a library's collection type as a zero-byte MARKER FILE in the library folder, not as a field in `options.xml`.** All four are correctly typed:
+>
+>    | Library | Marker file | Path (`options.xml` → `PathInfos`) |
+>    |---|---|---|
+>    | Movies | `movies.collection` | `/mnt/media/Media/Movies` |
+>    | Home Videos and Photos | `homevideos.collection` | `/mnt/media/Media/Photos` |
+>    | Music | `music.collection` | `/mnt/media/Media/Music` |
+>    | Shows | `tvshows.collection` | `/mnt/media/Media/TV` |
+>
+>    ⚠️ **[`diag-labserver-jellyfin-libs.sh`](diag-labserver-jellyfin-libs.sh) reported `<none/mixed>` for all four** because it greps `options.xml` for `<CollectionType>`, a field that does not exist there. **The suspicion was correct: the probe was wrong, not the config.** Fourth instance of this exact error in this project — `pgrep -f ffmpeg` matching the Jellyfin server, `strtonum` under mawk printing nothing, Event IDs queried without a provider. **An implausible reading is a bug report about the instrument.** ✅ **Fixed 2026-09-08** — the script now lists `*.collection` and is re-staged on the box, rather than being left in the repo as a diagnostic known to report false negatives.
+>
+>    ✅ **This makes the fix cleaner than expected.** All four libraries that need the ingest paths already exist *and are already the right type*, so adding a path is genuinely all that is required — no library creation, no type decision, nothing that could be got wrong. `<EnableRealtimeMonitor>true</EnableRealtimeMonitor>` is already set on them, and the ingest tree is local ext4, so inotify should surface new uploads without waiting for a scheduled scan.
+>
+>    📌 **Paths live in `options.xml` under `<PathInfos><MediaPathInfo><Path>`.** Add the second path **through the dashboard, not by editing that file** — Jellyfin holds library state in memory and rewrites the XML, so a hand edit while the service is running is liable to be overwritten.
+>
+>    ### 📺 A fourth category — `shows` — added 2026-09-08
+>
+>    Requested by Jon. Jellyfin's **`Shows` library already exists and is already typed `tvshows`**, so this is the same shape as the other three: one Nextcloud mount, one path added to an existing library.
+>
+>    ✅ **No `compose.yml` change and no container restart.** The stack bind-mounts the **whole** tree (`/srv/datakiin/data/media` → `/media`), so a new subdirectory appears inside the container by itself. That is a real dividend of mounting the tree rather than enumerating each folder — a per-folder mount would have needed an edit and a recreate for every new category.
+>
+⚠️ **[`setup-labserver-nextcloud-media.sh`](setup-labserver-nextcloud-media.sh) now provisions the host directory too**, because `shows/` did not exist and a plain root `mkdir` gets every one of the four required properties wrong: owner **uid 33** (Nextcloud writes uploads), group **`jony` + `g+w`** (Jon renames over SSH), **setgid** (subfolders inherit the group), files **0644** (Jellyfin, uid 101 and not in `jony`, reads via other-bits).
+>
+>    ✅ **RUN AND VERIFIED 2026-09-08.** `shows/` created as `drwxrwsr-x www-data(33):jony`, Nextcloud mount **id 4** `/shows → /media/shows`, applicable to All, `verify → status: ok`. The three existing mounts reported `EXISTS` / `SKIP` and were untouched — the idempotency did its job on a live system for the second time.
+>
+>    🎯 **Jellyfin's "The path could not be found" was correct, and the ordering it exposed is worth keeping.** Adding `/srv/datakiin/data/media/shows` to the Shows library was attempted *before* the directory existed and failed with exactly that message. **The directory must exist before Jellyfin will accept the path** — so the order is always: provision the host dir → create the Nextcloud mount → add the Jellyfin path. Related trap avoided: a quick `sudo mkdir` would have satisfied Jellyfin immediately while leaving `root:root 0755`, so Nextcloud (uid 33) could never write into it — the folder would be accepted, appear healthy, and silently never receive an upload.
+>
+>    ### 🔴 One real problem in the live content, 2026-09-08 — and one false alarm
+>
+>    **1. ✅ `Sled Dogs (2026)` in `home-videos` is CORRECT — deliberate, confirmed by Jon 2026-09-08.** ~1.2 GB, Season 01 (15 episodes) + Season 02 (13), named `Series (Year)/Season NN/Series - SNNENN.mp4`. **These are home movies**, organised with series-style naming as a filing convention. They are in the right mount and should stay there.
+>
+>    📌 **This was initially written up here as a misfiling and it was not.** The reasoning was that series-convention naming implies a `tvshows` library, so the content "belonged" in `shows/`. That inferred intent from filenames and got it backwards — **a naming convention is a choice the owner made, not evidence of where content belongs.** The structure is not wasted either: a `homevideos` library browses by **folder hierarchy**, so `Sled Dogs (2026)/Season 01/` displays as a clean nested tree. It simply does not *scrape* season/episode metadata, which is the correct outcome for family footage that no online database has ever heard of.
+>
+>    ⚠️ **The `shows/` mount is still right to have** — Jon asked for it and it is for actual TV shows. It is just not where this content goes.
+>
+>    **2. 🔑 Nextcloud creates subdirectories `drwxr-sr-x` — group `jony` but NOT group-writable — which silently breaks the SSH renaming chore.** `Sled Dogs (2026)/` and its `Season NN/` folders are `2755`, so `jony` **cannot rename, move or delete anything inside them** even though the top-level mounts are correctly `2775`. The `chmod 2775` this project applied covers only the directories it created; **everything Nextcloud creates afterwards arrives at the uploader's umask (022) and lands outside that guarantee.** This is a recurring condition, not a one-off to fix and forget.
+>
+>    ✅ **FIXED 2026-09-08 — option (c), the umask, plus a one-time repair.** Three were considered: **(a)** rename through the Nextcloud web UI instead of SSH — always works, since Nextcloud owns the files, but poor for bulk; **(b)** a periodic `find … -exec chmod 2775` fix-up, which treats the symptom on a schedule and is wrong the moment anyone uploads between runs; **(c)** stop the container creating non-group-writable directories in the first place. **(c) is the only one that fixes the cause**, so it is what was done.
+>
+>    **The compose change** — [`nextcloud/compose.yml`](nextcloud/compose.yml), and it is deliberately a `command`, not an entrypoint override:
+>
+>    ```yaml
+>    command: ["sh", "-c", "umask 0002 && exec apache2-foreground"]
+>    ```
+>
+>    Nextcloud creates directories with `mkdir(0777)` and files with `0666`, **both masked by the process umask**, and the image inherits Docker's default `022`. `0002` yields dirs `0775` and files `0664`.
+>
+>    📌 **Three details in that one line, each of which would break something if dropped:**
+>    - **`command`, not `entrypoint`** — compose's `command` replaces only the `"$@"` the image entrypoint execs at the very end, so the entrypoint still does its install/upgrade work as root under the default umask. Overriding the entrypoint would have skipped that.
+>    - **`exec`** — keeps apache as pid 1 so Docker's signals still reach it. Without it the shell holds pid 1 and `docker stop` degrades into a 10-second timeout and a kill.
+>    - **`0002`, not `0000`** — `0000` would make everything world-writable on a machine that is internet-facing. `0002` grants the group and nothing else.
+>
+>    ✅ **Jellyfin is unaffected, which is the property to check before trusting any permission change here.** It runs as uid 101 and is **not** in group `jony`, so it reads entirely through the other-bits — `0775` keeps `r-x` on directories and `0664` keeps `r` on files. The one thing that would break playback is untouched.
+>
+>    ⚠️ **Both halves are required and neither is sufficient.** The umask cannot reach backwards to the folders that already exist; a `chmod` cannot reach forwards to the next upload. Doing only one looks fixed and is not — which is the same shape as the original bug, where a correct one-time `chmod 2775` on the mounts made the tree look right while every child arrived wrong.
+>
+>    ✅ **[`setup-labserver-nextcloud-umask.sh`](setup-labserver-nextcloud-umask.sh)** does both, idempotently, with `--dry-run`. It reads the **running process's** umask from `/proc/1/status` rather than running `umask` in a fresh shell — a new shell reports its own value and would say nothing about the server. It finishes by testing `sudo -u jony test -w` on a real uploaded folder, because mode bits are the mechanism and *"can Jon actually write there"* is the requirement.
+>
+>    ⚠️ **The mode-bit check cannot prove the umask worked** — the one-time repair produces the identical reading either way. The only real proof is uploading into a **new** folder and confirming it arrives `drwxrwsr-x`.
+>
+>    ### ✅ APPLIED AND VERIFIED 2026-09-09
+>
+>    | Check | Before | After |
+>    |---|---|---|
+>    | apache pid 1 umask (`/proc/1/status`) | **`0022`** | ✅ **`0002`** |
+>    | non-group-writable dirs under the tree | **3** | ✅ **0** |
+>    | `sudo -u jony test -w` on an uploaded folder | fails | ✅ **WRITABLE** — `.../Sled Dogs (2026)` |
+>    | Repaired in place | — | 3 dirs, 66 files |
+>
+>    ✅ **The public path survived the recreate**, checked outside-in from Romulus rather than assumed: `cloud.datakiin.com` → `302 → /login → 200`, `watch.datakiin.com` → `302`, both resolving to `172.233.207.73` with `ssl_verify_result=0`; `status.php` reports installed and not in maintenance; all four mounts still `drwxrwsr-x www-data:jony`.
+>
+>    📌 **Worth noting *why* that was not a given: the container gets a new `edge` IP on every `--force-recreate`, and Caddy still found it** — because the Caddyfile addresses it by **container name**, which Docker's embedded DNS re-resolves. A config pinned to `172.20.0.x` would have broken here, silently, exactly as the Known-proxies `/24` and `extra_hosts` notes elsewhere in this document predict. Third time that convention has paid out.
+>
+>    ⚠️ **`db` and `redis` restarted too, contrary to what was predicted.** `up -d --force-recreate app` names one service, but compose brought all three up (`[+] up 3/3`, each reporting `Started`) because `depends_on` pulls them into the operation. Harmless — Postgres and Redis both came back and Nextcloud is serving — but **"only the named service is touched" is wrong for a service with `depends_on`.** Plan the outage for the whole stack, not one container.
+>
+>    ✅ **[`setup-labserver-nextcloud-media.sh`](setup-labserver-nextcloud-media.sh)** is the repeatable record, staged on the box at `/srv/datakiin/`. It **diagnoses before it changes** — prints container state, `occ status`, `occ user:list` (which is what corrected the "blocker" framing above), the container's view of `/media`, and the existing mount list — then provisions the host directories with the writer's ownership, enables `files_external`, creates **all four** Local mounts idempotently, sets `filesystem_check_changes`, and verifies each one. Run `--dry-run` first. **Run twice on a live system (09-08) with no collateral damage**: existing mounts report `EXISTS`/`SKIP` and are left alone.
+>
+>    📌 **Why External Storage rather than an ordinary Nextcloud folder**, since this is the part that is easy to get wrong: Nextcloud's own storage keeps uploads under `data/<user>/files/` with the **database** as the source of truth for names. Jellyfin reading the same disk would find a tree it cannot match to anything. A **Local** external mount points Nextcloud at a directory that already exists and leaves the filenames alone — which is the entire requirement.
+>
+>    📌 **The mounts get `filesystem_check_changes 1`.** Jon does the renaming chore from *outside* Nextcloud (over SSH), and without that option Nextcloud serves its cached listing and the rename stays invisible in the web UI. Same family as every other stale-cache trap here: the change is real, the reader is looking at a snapshot.
 > 3. 🌐 **Stand up the VPS + WireGuard** — 🟡 **BOX RENTED AND HARDENED 2026-09-02; tunnel half-built.**
 >
 >    | | |
@@ -834,7 +1077,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 >    ## 🎉 **PUBLIC PATH LIVE 2026-09-02 — the whole chain works end to end**
 >
->    Caddy deployed with the tunnel publish and PROXY protocol; box and repo byte-identical again (Caddyfile `009cb7b0…`, compose.yml `38b56004…`; backups `*.bak-prevps-20260902`).
+>    Caddy deployed with the tunnel publish and PROXY protocol; box and repo byte-identical again (Caddyfile `10694b9a…`, compose.yml `38b56004…`; backups `*.bak-prevps-20260902`).
+
+> 📌 **Caddyfile hash corrected 2026-09-03.** This line read `009cb7b0…`, which matched nothing — re-checksummed on the box and it is **`10694b9a…`, byte-identical to the repo**, so the `cloud.datakiin.com` handler *is* deployed and there was never any drift. The recorded value was most likely taken before the final comment edit at 11:17. **compose.yml's `38b56004…` was correct.** Worth noting the near-miss: a wrong hash written down as verification is worse than no hash, because the next reader spends the drift investigation on a typo.
 >
 >    | Check | Result |
 >    |---|---|
@@ -890,9 +1135,20 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >
 >    In this order. **Explicitly deprioritised by Jon: off-box backups and family user accounts.** They stay on the list below as known-good ideas, not as pending work — do not lead with them.
 >
->    1. 📱 **Quick Connect — for phones as well as TVs.** Toggle is Dashboard → General → *Enable Quick Connect on this server*. Worth noting the framing correction: this was first raised here as a TV-remote convenience, but Jon wants it for **phone apps too**, and it is arguably better there — it avoids typing a password into a third-party client at all. ⚠️ Check what it means for an internet-facing server before enabling: Quick Connect authorises a device from an **already-authenticated session**, so its security rests on the existing session, but it is worth confirming there is no path to initiate it from outside without one.
+>    1. ✅ **Quick Connect — ENABLED, observed 2026-09-08** in Dashboard → General (*Enable Quick Connect on this server*, checked). Wanted for **phone apps as well as TVs** — it avoids typing a password into a third-party client at all. ⚠️ **It went on ahead of the "check what this means for an internet-facing server" caveat this item carried**, so recording the assessment after the fact: the exposure is small, because Quick Connect authorises a new device from an **already-authenticated session**, and there is no path to initiate one from outside without an existing login. Fine as it stands — but note the caveat was skipped, not satisfied.
 >    2. 🔒 **Tighten Jellyfin's `0.0.0.0:8096` bind** — currently reachable from every tailnet node. ⚠️ **Bind to loopback *and* the bridge (`127.0.0.1` + `172.20.0.1`), never plain loopback** — Caddy runs in a container and reaches Jellyfin over the `edge` gateway, so loopback-only would break the public door entirely. Verify with `ss -tlnp | grep 8096` (expect the two addresses, not `0.0.0.0`), a probe from Romulus to `100.86.218.41:8096` (expect refused), **and** a `curl` through Caddy (expect still 302) — all three, because the first two passing while the third fails is exactly the failure this warning exists to prevent.
->    3. 🎬 **The media libraries waiting on Nextcloud** — now **three**, not two: `movies`, `home-videos`, and the newly-added `music`. Gated on the Nextcloud stack being deployed, which needs no Caddy change any more (the wildcard cert and the `cloud.datakiin.com` handler are already live; it just 502s until the container exists).
+>    3. 🎬 **The media libraries** — **four** now: `movies`, `home-videos`, `music`, `shows`. 📌 **Updated 2026-09-08 — the Nextcloud half is DONE.** All four mounts exist, are applicable to All, carry `filesystem_check_changes=1`, and verify `ok`; the host directories are `www-data(33):jony 2775` setgid.
+>
+>       ⏳ **What remains is four path additions in the Jellyfin dashboard**, and nothing else. All four libraries already exist *and are already correctly typed*, so this is not a library-creation job: Libraries → the library → **+** under Folders → add the **host** path (`/srv/datakiin/data/media/*`, never the container's `/media` — Jellyfin is native).
+>
+>       | Existing library | Add |
+>       |---|---|
+>       | Movies | `/srv/datakiin/data/media/movies` |
+>       | Home Videos and Photos | `/srv/datakiin/data/media/home-videos` |
+>       | Music | `/srv/datakiin/data/media/music` |
+>       | Shows | `/srv/datakiin/data/media/shows` |
+>
+>       🎯 **Then the end-to-end test, which is the only check that matters:** upload one file through `cloud.datakiin.com` and confirm it appears in Jellyfin. Every check run on 09-08 passed while the two halves pointed at different trees — end-to-end is the only one that could have caught that.
 >
 >    🟢 **Unblocked and can start now, independently of any of the above:** getting Jose's music **tagged with MusicBrainz Picard**. It happens on his machine, not labserver, and it is the step that decides whether the music library is usable — so it can land ready rather than becoming the bottleneck after Nextcloud goes up.
 >
@@ -903,9 +1159,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 >    ✅ **The DDNS gap is deleted, not solved.** Every earlier draft needed a dynamic-DNS updater because the record pointed at a residential IP on a changing lease — hence the planned `dg.datakiin.com` indirection. **A Linode address is static.** Write the record once; `dg.datakiin.com` is no longer needed and should be dropped rather than built.
 >
 >    Original authoring note: ✅ **fully authored 2026-09-01 in [`vps/`](vps/)** (`setup-vps.sh`, `setup-labserver-wireguard.sh`, `nginx-stream.conf`, README with the rental spec). Chosen **Linode Nanode 1 GB, Washington DC (`us-iad`)**, ~$5/mo expected, 1 TB traffic, IPv4 included. ⚠️ **Hetzner was recommended twice and dropped:** it is cheap in the EU and not in the US — the only Ashburn plan was **CPX11 at $21.09/mo**, ~3× its EU equivalent. 📌 **Three price figures were quoted in this project from memory and two were flatly wrong** ("$4–5/mo, ~20 TB", then "€11.99/mo, 0.5 TB"). `us-iad` is the same metro as Ashburn, so the Minecraft-latency argument is unchanged. The [`vps/`](vps/) scripts are provider-agnostic — only the firewall step differs. Ashburn is chosen for Minecraft latency: Danny is DC-metro (Cloudflare serves him from `IAD`, his Verizon hop is East Coast). Tunnel subnet **`10.10.0.0/24`**, checked against every subnet in play. Everything public depends on this step.
-> 4. ⛏️ **Migrate Minecraft off Romulus.**
+> 4. ⛏️ **Migrate Minecraft off Romulus.** 🚧 **BLOCKED BY A CONSTRAINT, NOT BY WORK — [labserver is off ~12h every night](#-labserver-is-off-about-12-hours-every-night), Romulus is not.** Migrating public worlds onto it hands strangers a server that dies nightly. Settle the availability question with Danny *before* moving anything; the technical steps are ready and are not the problem.
 >
-> **Open:** `files/` (Syncthing + FileBrowser) is authored but **orphaned** — Syncthing was the wrong tool once the requirement turned out to be many-to-one ingest rather than mirroring. Either delete it or keep FileBrowser alone for renaming uploads into Jellyfin's convention.
+> ~~**Open:** `files/` (Syncthing + FileBrowser) is authored but **orphaned**~~ ✅ **CLOSED — it was DELETED 2026-09-01**, the same day it was authored. This line survived as a contradiction of the `files/` entry under Jon's environment for a week; the decision it asks for had already been taken. Nextcloud's own web UI covers the renaming FileBrowser would have been kept for.
 
 > ▶️ **ACTIVE 2026-08-13**
 >
@@ -937,6 +1193,10 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 **Networking + exposure**
 
 - **A bind address is a stronger control than a firewall rule, because it fails closed.** A firewall must be present, correct, *and* active to say no — turn it off, or route around it as Docker and Tailscale both do, and everything behind it is open. A bind address is a property of the socket: if nothing listens on that interface, there is no connection to filter. Same lesson the kids' PCs taught in [FamilyNetwork](../CLAUDE.md).
+- ⏳ **A to-do item is a claim about the past, and unrecorded work makes it confidently wrong.** This document listed the three Nextcloud External Storage mounts as "not yet done" for five days after they had been built — a 09-04 session created all three mounts *and* two user accounts *and* changed the admin password, and wrote none of it down. The next session then planned around the stale list, wrote a script to create mounts that already existed, and filed the empty media tree as corroboration. **The cheap defence is that the script diagnosed before it changed** — it printed the live mount list, reported `SKIP` three times, and cost nothing. Had it just executed the plan it would have duplicated working config. Generalises the FamilyNetwork rule (*when docs and a live object disagree, the object wins; then fix the docs*) to **your own backlog**, and note the direction: a stale ⏳ is wrong *pessimistically*, so it wastes a session rather than breaking something — which is exactly why it survives so long unnoticed.
+- 🧊 **An empty data directory is not evidence that the plumbing above it is missing.** `0 files` under `/srv/datakiin/data/media` read as "nothing is wired up yet"; in fact all three mounts existed and verified `ok`, and the tree was empty simply because nobody had uploaded anything. **Absence of output is not absence of configuration** — check the layer you actually care about.
+- 🔑 **A `.env` records the credential a service was *installed* with, never the one it currently accepts.** `NC_ADMIN_PASSWORD` in Nextcloud's `.env` was rejected with `401` on every endpoint; the value was clean (shape-checked on the box — right length, no CR, no space, no colon), the install had genuinely used it, and it had simply been changed in the UI afterwards. The file sat there for days reading like the live credential. **Install-time config is a historical record, and the running service is the only authority** — exactly the same shape as this document asserting Ollama was on loopback because that was the intent. Corollary: after changing a password in an app's own UI, either update the file or delete the stale key, because leaving it is worse than never having written it.
+- 🔍 **`autoconfig.php` is world-readable and answers "which credentials did this install actually use?" without root.** Worth knowing because almost everything else in a Nextcloud install (`config.php` `0640`, `data/` `0770`) is not readable by an unprivileged admin user. Here it turned out to be the **stock template with no admin keys at all**, which was itself the answer: the install took its credentials from the environment, so the env vars were right and the password had drifted since. **Compare secrets by `sha256sum` rather than printing them** — it settles match-vs-mismatch with nothing sensitive entering the transcript, the same trick that shape-checked the Cloudflare tunnel token.
 - **Don't trust your own docs about a bind address — run `ss`.** This doc asserted for two days that Ollama was on `127.0.0.1` because that was the *intent*; a systemd override said `0.0.0.0` and it had been listening tailnet-wide the whole time. Intent in a comment is not configuration. `ss -tlnp` is the only authority on what is listening; `systemctl show <svc> -p Environment` on why.
 - ⚠️ **Docker publishes ports *around* ufw, not through it.** The daemon writes its own `DOCKER`/`DOCKER-USER` chains and DNATs published ports before ufw's INPUT rules are consulted. A bare `ports: ["8096:8096"]` is reachable from the whole LAN *and* every tailnet node while `ufw status` still reads "deny". The fix is the **bind address**: `127.0.0.1:8096:8096`, or publish nothing and use the shared `edge` network. Belt-and-braces: a default-deny in `DOCKER-USER`, which *is* consulted for forwarded traffic.
 - **"The firewall will stop it" is not an answer when the firewall runs on the machine you assume gets compromised.** Host-based egress rules protecting a *third party* are enforced by the untrusted host itself — root flushes them. Worse, same-L2 adjacency lets a rooted box ARP-spoof its neighbours regardless of its own ruleset. Isolation must live **off** that host: VLAN, guest network, or a firewall in between.
@@ -959,6 +1219,9 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - ⚠️ **`host-gateway` resolves to `docker0` — which is DOWN if every stack uses a user-defined network.** `extra_hosts: host.docker.internal:host-gateway` points at the *default* bridge (`172.17.0.1`), not at the network the container is actually on. Here that address belongs to a bridge nothing is attached to. It still works, but only because ufw's rule is **source**-matched and Linux keeps a down interface's address locally routable — a lot of coincidence to rest a family service on. Name the live gateway explicitly. When a proxy 502s, the upstream IP is **in the log**: `dial tcp <IP>` identifies the culprit instantly.
 - **ufw rules match source address + destination PORT, not destination IP.** `allow from 172.20.0.0/14 to any port 8096` permits that source to hit port 8096 on *every* address the host owns — including a different bridge's IP. This is why the proxy works while dialing an interface that is down, and why reading the rule as "allow the edge bridge to reach itself" would be wrong. It also means such a rule is broader than it looks: a `/14` covers every present and future docker bridge.
 - **`i/o timeout` vs `connection refused` tells you firewall-vs-nothing-listening.** A silent DROP (firewall) times out; a closed port answers with RST immediately. The 3.00 s duration in a 502 log line is itself the diagnosis.
+- ⚠️ **"Disproved" is scoped to the incident it was disproved in.** The DHCP-race hypothesis was correctly ruled out for the 2026-09-01 Caddy failure and written down as wrong. Eleven days later the identical symptom had *exactly that* cause, and the earlier note was sitting there ready to talk the next reader out of the right answer. **Record what a hypothesis was ruled out *for*, not just that it was ruled out** — a service can fail the same visible way for unrelated reasons, and the second one does not care what the first one turned out to be.
+- ⚠️ **A container binding a literal host address will lose a race with DHCP at boot, and nothing in the standard ordering saves you.** `network-online.target` sounds like it means "the network is ready." Under ifupdown's `allow-hotplug` + `inet dhcp`, with `systemd-networkd-wait-online` disabled, the target is reached **before the lease lands** — so docker.service's `After=network-online.target` is satisfied and buys nothing. The container dies with `cannot assign requested address`. **Wait on the precondition that actually failed** (the address being present on an interface), not on a target that merely sounds like it. And derive the addresses from the compose file rather than retyping them into the unit, or you have created a second literal to keep in sync.
+- 🔬 **When one of several similar things fails, look for what the survivors do differently — it is often the whole diagnosis.** Three containers came back from the same boot; only Caddy failed. cloudflared and the web nginx **publish no host ports**; Caddy publishes two literal host addresses. That single structural difference turned a plausible bind-race story into a one-for-one correlation with no further work. **Cheaper than reading logs, and it independently confirms them.**
 - 🔁 **A long-running process can start succeeding without restarting, because the fix lived outside it.** Reasoning error made and corrected in one session: Caddy logged a 502, then served 8/8 clean 200s ~80 min later from the *same pid*, so "no restart ⇒ nothing was fixed ⇒ it must be intermittent" — and a whole intermittent-failure theory got written up. Wrong. **A ufw rule was added in between**, changing kernel packet handling with no restart, no reload, and no entry in the application log. Before theorising about an application, ask what changed in the *environment* around it.
 - **Count the occurrences before escalating a log line.** `grep -c 'i/o timeout'` returned **1**. One 502 across the container's entire life is a transient during setup; the same line seen once and assumed recurring produced an urgent "do not ship" recommendation that the evidence never supported. Severity is a frequency question, and it costs one `grep -c` to answer.
 - **Test the cheap hypothesis before writing it down as likely.** "`host.docker.internal` probably resolves to both addresses" was plausible, load-bearing, and settled by a single `getent ahosts` — which returned exactly one address. The command was available the whole time; the theory got written first.
@@ -1012,6 +1275,7 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - **Sanity-check a credential by shape, never by printing it.** `.env` was validated as length 53, no whitespace, no quotes, no CR, `[A-Za-z0-9_-]` only — enough to rule out every common paste error (wrapped quotes, trailing `\r` from Windows, the whole install command pasted instead of the token) without the secret ever entering a transcript. Same technique that caught the `eyJ` tunnel-token mistake.
 - **Unquoted shell arguments are a UX trap for non-technical users.** `hey it's broken` leaves bash at a `>` continuation prompt — indistinguishable from a hang. `>` silently redirects the message into a file; `&` backgrounds it. Any tool taking free text from a shell should offer an **interactive `read -r` prompt** as the primary path, where the shell never parses the input at all.
 - ⚠️ **`/proc/PID/net/tcp` is IPv4 ONLY — dual-stack listeners live in `net/tcp6`.** Reading only the first file showed Caddy holding nothing but its admin socket, which produced a confident and completely wrong "Caddy is serving no sites." It was listening on `[::]:443` and `[::]:80` the entire time. A Go server binding `:443` creates one dual-stack socket that appears **exclusively** in `tcp6`. **Read both, or declare a healthy service dead.**
+- ⚠️ **Traffic through a relay is metered on the way OUT of the relay — in BOTH directions of user traffic.** Linode counts outbound only, so an upload *into* the server looks free. It is not: the bytes arrive on the VPS's `eth0` (free), then leave again down the WireGuard tunnel to labserver as encapsulated UDP, and that leg **counts**. So streaming out and uploading in each cost roughly 1× the data against the same 1 TB. Irrelevant for ten songs; decisive for a 300 GB initial library, where it turns "slow but fine" into 30% of a month's allowance and makes sneakernet the obvious answer. **When a box only relays, its quota is consumed by every byte in either direction — reason about the relay's egress, not the user's.**
 - 🔥 **A capability being present, and a service being configured to use it, are two different facts — and nobody notices the gap while the workload stays light.** The RTX 3060's NVENC was measured working on 2026-08-14 (8 concurrent sessions, `h264_nvenc` and `hevc_nvenc` both functional) and that got recorded as the streaming ceiling. Jellyfin's own setting was `HardwareAccelerationType = none` the entire time; the real ceiling was ~3. It went unnoticed for weeks because household playback **direct-streams** and never invokes an encoder at all — the failure had no symptom until someone forced a transcode and looked. **Measuring the hardware is not measuring the service.** Read the application's config, and when it is root-owned and you keep deferring, that deferral is the finding.
 - ⚠️ **A sub-setting reading `true` under a master setting reading `none` looks configured and is not.** `EnableHardwareEncoding = true` sat directly above `HardwareAccelerationType = none`, and grepping for "hardware" returned both. Same family as `interfaces` without `bind interfaces only`, and as this document asserting Ollama was on loopback because that was the intent. **Read the field that gates the others, not the one whose name matches your search.**
 - ✅ **Verify a client-IP fix from the service's own log, using an event you deliberately caused.** Known proxies was proven by firing one failing login from a machine with a known public IP and grepping Jellyfin's log — which then held the before and after in the same file, same event type, address flipping exactly at the restart. Two details made it safe and unambiguous: a **username that does not exist** (so no real account accrued a lockout count) and a grep for **all three candidate addresses at once** (`76.100.245.192`, `172.20.0.x`, `10.10.0.1`), so the result named *which* hop was working rather than just pass/fail. Beats "stream from a phone and squint at the dashboard".
@@ -1020,3 +1284,12 @@ Dedicated **4 TB drive** (`/dev/sdb1`, label **DATAKIIN**, ext4, mounted **by UU
 - ⚠️ **Two different `curl` binaries are not a controlled comparison.** The public path reported `proto=1.1` while LAN-direct reported `proto=2`, which read as "something in the nginx/WireGuard chain is downgrading HTTP/2" — a plausible, interesting, entirely fictional finding. The LAN test had run on **labserver's** curl and the public test on **Romulus's Git Bash curl, which has no HTTP/2 support at all** (`--http2` errors out; `-v` shows no ALPN lines). Re-run from an h2-capable client and the tunnel negotiates `h2` fine. **Hold the client constant when comparing two network paths**, and when a protocol-level difference appears between two hosts, check the tools before theorising about the wire. Same family as the mawk and `pgrep -f ffmpeg` errors below.
 - ⚠️ **`strtonum()` is a gawk extension; Debian ships mawk, which fails and prints nothing.** An awk probe that had worked minutes earlier was rewritten using `strtonum`, produced empty output, and read as "the container restarted and the state changed" — when the state was identical and only the parser had broken. **When output changes and the system demonstrably did not, suspect the tool before the system.** Same family as the `pgrep -f ffmpeg` and Event-ID-without-provider errors already recorded here.
 - **Long heredocs piped to an interpreter are fragile in this environment; write the script to a file and run it.** Two multi-hundred-line `<<'PY'` blocks died with `unexpected EOF while looking for matching quote` despite being correctly quoted, while short ones in the same session worked fine. Not worth debugging — `Write` the script, then execute it.
+- 🔗 **Verifying each end of a pipeline separately does not verify the pipeline.** Nextcloud's three external mounts existed, were `Local`, applicable to all users, and each returned `status: ok`. Jellyfin's four libraries existed and were all readable by the service account. Every check passed — and the two halves pointed at **different directory trees** (`/srv/datakiin/data/media/*` vs `/mnt/media/Media/*`), so an upload would have landed perfectly and been invisible forever. **The question is never "is each end healthy", it is "does a byte written at one end appear at the other."** Test with an actual file through the actual path; the end-to-end check is the only one that could have failed here, which is exactly why it is the one worth running.
+- ⚠️ **A human-formatted table is free to omit the field you are verifying — so it cannot prove a negative.** `files_external:option <id> filesystem_check_changes 1` returned success for all three mounts under `set -e`, while `files_external:list` showed the identical empty `Options` column before and after. That looked like a silent no-op; `--output=json` showed `"filesystem_check_changes":1` on all three and the write had landed correctly both times. **The exit code and the table disagreed, and the table was the liar.** Verify effects in a **machine-readable** view rather than the pretty one — and note the asymmetry that makes this worth a rule: a table showing a value proves it is set, but a table *not* showing it proves nothing at all.
+- 📁 **Bind-mount the whole tree, not each folder — the cost of a new category is then zero.** `/srv/datakiin/data/media` is mounted into the Nextcloud container as `/media`, so adding a fourth ingest category (`shows`) needed a `mkdir` and one `occ files_external:create` — no `compose.yml` edit, no recreate, no downtime. Had the stack enumerated `movies`, `home-videos` and `music` individually, every new category would have meant editing the compose file and restarting the service the family uploads through. **Mount the container of the thing, not the things.**
+- 🔑 **Fixing permissions on a directory does not fix permissions on what gets created inside it later.** The three media mounts were deliberately `chown 33:jony` + `chmod 2775` + setgid, and that was verified correct. Every folder Nextcloud has since created inside them is `drwxr-sr-x` — group `jony` but **not group-writable** — because the uploading process brings its own umask (022) and setgid only propagates the *group*, never the *mode*. The result is that the documented SSH renaming workflow is blocked inside precisely the folders that contain the content. **A one-time `chmod` is a statement about the past; a service that keeps writing needs its umask fixed, or the guarantee decays with every upload.** Same family as the ufw rules pointing at a dead subnet: the control was correct when applied and quietly stopped covering the live case.
+- 🧱 **Provision the directory before the consumer, and provision it with the *writer's* identity in mind.** Jellyfin refused `/srv/datakiin/data/media/shows` with "The path could not be found" — correctly, because the directory did not exist yet. The tempting one-line fix, `sudo mkdir`, would have cleared that error instantly and created a **worse, quieter** bug: `root:root 0755` satisfies Jellyfin (which only reads) while making the folder unwritable by Nextcloud's uid 33 (which does the uploading), so the library would look healthy and never receive a file. **The error you can see is raised by the reader; the failure that matters belongs to the writer.** Order is: create the directory with the writer's ownership → wire the writer → wire the reader.
+- 🎭 **setgid propagates the GROUP, never the MODE — so "I set the parent 2775" is not a statement about its children.** The three media mounts were correctly `chown 33:jony` + `chmod 2775` + setgid, and verified. Every directory Nextcloud then created inside them arrived `drwxr-sr-x` — group `jony` as intended, and **not group-writable**, because the creating process brings its own umask (Docker's default `022`) and setgid has no say over the permission bits. Renaming a file needs write on its *parent directory*, so the documented SSH workflow was blocked inside exactly the folders holding the content, while `ls` on the mounts kept showing the correct `2775`. **A one-time `chmod` is a statement about the past; a service that keeps writing needs its umask fixed or the guarantee decays with every upload.** Fix both ends — the umask cannot reach backwards and the chmod cannot reach forwards, and doing only one looks fixed.
+- 🔬 **Read a running process's umask from `/proc/PID/status`, never by running `umask` in a new shell.** `docker exec <container> sh -c umask` reports the umask of the shell you just started, which inherits from the daemon and is unrelated to the long-running server you actually care about. `grep Umask /proc/1/status` reads the real property of the real process. Same family as reading `ss` rather than trusting the docs about a bind address: ask the running thing, not something that merely resembles it.
+- ⚠️ **A repair and a prevention can produce identical readings, so the repair can hide whether the prevention worked.** After fixing the umask *and* chmod-ing the existing tree, every directory reads `drwxrwsr-x` — exactly what you would see if the chmod had run and the umask change had silently failed. **The verification has to exercise the new path**: create a folder through the service and check what it arrives as. Checking the repaired files proves only that `chmod` works.
+- ⚠️ **`docker compose up -d --force-recreate <service>` does not touch only that service — `depends_on` drags its dependencies in.** Naming `app` brought `nextcloud-db` and `nextcloud-redis` up as well (`[+] up 3/3`). Harmless here, but the prediction given beforehand — "db and redis keep running" — was wrong, and on a stack where a database restart is not free that is the difference between a five-second blip and a real outage. **Scope the expected downtime to the dependency graph, not to the service you named.**

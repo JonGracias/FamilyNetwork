@@ -14,16 +14,17 @@ upload is a single POST: if it dies three hours in, it starts over. Nextcloud
 chunks and resumes. That is the whole reason for the extra weight of a
 database and a Redis instance.
 
-## Three libraries, because the type decides the behaviour
+## Four categories, because the type decides the behaviour
 
-Jellyfin's library **type** controls whether it scrapes metadata, so the three
+Jellyfin's library **type** controls whether it scrapes metadata, so these
 kinds of content cannot share a folder.
 
 | Folder | Jellyfin library type | For |
 |---|---|---|
 | `/srv/datakiin/data/media/movies` | **Movies** | Commercial films — gets posters, cast, synopsis from TMDB |
 | `/srv/datakiin/data/media/home-videos` | **Home Videos & Photos** | Family footage — no scraping, no failed matches |
-| `/srv/datakiin/data/media/music` | **Music** | 🆕 Jose's collection — see below |
+| `/srv/datakiin/data/media/music` | **Music** | Jose's collection — see below |
+| `/srv/datakiin/data/media/shows` | **Shows** (`tvshows`) | 🆕 2026-09-08. TV series — needs `Series (Year)/Season NN/Series - SNNENN.mkv` |
 
 Put family footage in a Movies library and Jellyfin tries to match
 `Christmas 2004.mkv` against TMDB, fails, and displays it as an unidentified
@@ -88,6 +89,45 @@ substitute for finding new music.
 **Storage goes on `/srv/datakiin`**, same as the other two, because `/mnt/media`
 is owned by `deks` and `jony` cannot write there. Music is small relative to
 video, so the 3.6 TB free is a non-issue.
+
+#### ✅ Ingest decided 2026-09-02 — Jose is REMOTE
+
+He is not on the house LAN, so **Samba is not available to him** and Nextcloud
+is his path. That is the whole reason this stack exists; Danny, who *is* on the
+LAN, should still be pointed at the Samba share instead.
+
+**Two different problems, two different answers:**
+
+| | Route | Why |
+|---|---|---|
+| **Initial bulk load** | 🚚 **Sneakernet — a USB drive** | Days of upload, and ~30% of a month's VPS transfer |
+| **Every addition after** | 🌐 **Nextcloud web UI** | Seconds to minutes; the network path is right for this |
+
+**The incremental case is a non-issue.** Ten songs is ~100 MB as MP3 320 or
+~350 MB as FLAC — under a minute to a few minutes on any normal upload, and
+0.035% of the monthly quota at worst. Nextcloud chunks and resumes, so a flaky
+link handles that size without trouble.
+
+⚠️ **Uploads consume the VPS transfer quota too, roughly 1:1 — this is not
+obvious.** Linode meters outbound only, so an upload *looks* free. But traffic
+passing through a relay leaves twice: it arrives from the contributor on `eth0`
+(free), then the VPS forwards it down the WireGuard tunnel to labserver, which
+**exits on `eth0` as encapsulated UDP and is metered**. The counters show this
+shape already (`eth0 rx 1.73 GB` vs `wg0 rx 1.65 GB`). Irrelevant for ten songs;
+decisive for a 300 GB library. **Confirm it empirically** with
+`vnstat -i eth0 -m` either side of a known-size upload before trusting the 1:1.
+
+🚚 **The open question on sneakernet is delivery.** "Carry a drive over" assumes
+physical proximity that a remote contributor does not have — the drive has to be
+mailed to Danny or wait for a visit. If neither is practical, uploading over the
+network is the fallback: budget days, and **split it across two billing months**
+rather than discovering Linode's overage rate the expensive way. (That rate is
+still unrecorded — see the VPS README.)
+
+⚠️ **Do not point the Nextcloud desktop sync client at the music folder.** Sync
+is bidirectional; he would pull the entire library back down. That is the same
+mirroring trap that got Syncthing rejected for this job. **Web UI upload only**
+for contributors.
 
 ### Naming, for the Movies library only
 
@@ -172,25 +212,65 @@ wildcard did not issue and Caddy is serving its self-signed fallback.
 Uploads must land as **real files with real names** on disk, not inside
 Nextcloud's internal store, or Jellyfin will never see them.
 
-1. Sign in as admin → *Apps* → enable **External storage support**
-   (`files_external`, bundled).
-2. *Administration settings* → *External storage* → add three mounts:
-   - `Movies` → Local → `/media/movies`
-   - `Home Videos` → Local → `/media/home-videos`
-   - `Music` → Local → `/media/music`
-   - Available for: the group you give contributors
-3. Upload a test file, then confirm it exists on the host:
+✅ **DONE — all four mounts exist and verify `ok` (2026-09-08).** Do not do this
+by hand; [`../setup-labserver-nextcloud-media.sh`](../setup-labserver-nextcloud-media.sh)
+is idempotent, provisions the host directory with the correct ownership first,
+and reports `SKIP` for anything already mounted:
 
 ```bash
-ls -l /srv/datakiin/data/media/movies/
+sudo bash /srv/datakiin/setup-labserver-nextcloud-media.sh --dry-run   # look first
+sudo bash /srv/datakiin/setup-labserver-nextcloud-media.sh
 ```
+
+Live state — mount points are lower-case, applicable to **All** users, each
+with `filesystem_check_changes=1` so renames made over SSH are noticed:
+
+| id | Mount point | Local path |
+|---|---|---|
+| 1 | `/movies` | `/media/movies` |
+| 2 | `/home-videos` | `/media/home-videos` |
+| 3 | `/music` | `/media/music` |
+| 4 | `/shows` | `/media/shows` |
+
+⚠️ **`files_external:list` prints an empty `Options` column even when options
+are set.** Verify with `--output=json`, which is the only view that
+distinguishes "not set" from "not displayed".
 
 ## Point Jellyfin at them
 
-Add **two new libraries** to Danny's existing Jellyfin — do not touch his.
-`/mnt/media` is owned by `deks` and `jony` cannot write there; that stays as
-it is. These live on Jon's own drive instead, which is the writable half of
-the arrangement.
+🔴 **CORRECTED 2026-09-08 — do NOT add new libraries.** This section used to say
+"add two new libraries", which is wrong and would leave the family with two
+`Movies` entries in the UI. All four libraries **already exist on Danny's
+Jellyfin and are already the correct type** (verified: the type is a zero-byte
+marker file — `movies.collection`, `homevideos.collection`, `music.collection`,
+`tvshows.collection` — *not* a field in `options.xml`).
+
+**Add a second folder to each existing library instead.** Dashboard → Libraries
+→ the library → **+** under Folders:
+
+| Existing library | Add this path |
+|---|---|
+| Movies | `/srv/datakiin/data/media/movies` |
+| Home Videos and Photos | `/srv/datakiin/data/media/home-videos` |
+| Music | `/srv/datakiin/data/media/music` |
+| Shows | `/srv/datakiin/data/media/shows` |
+
+Each library then shows Danny's `/mnt/media/Media/*` and this ingest tree as
+one merged view. `/mnt/media` is owned by `deks` and `jony` cannot write there;
+that stays as it is. These live on Jon's own drive instead, which is the
+writable half of the arrangement.
+
+⚠️ **Host paths, not the container's `/media`** — Jellyfin is native, not
+containerised, so it cannot see inside the Nextcloud container.
+
+⚠️ **The directory must exist before Jellyfin will accept the path**, or it
+refuses with *"The path could not be found."* Run the setup script first.
+
+🎯 **This is the step that was missing for a week.** Nextcloud's mounts and
+Jellyfin's libraries were each independently healthy and verified while
+pointing at **different trees**, so uploads would have landed perfectly and
+been invisible forever. Finish with an actual end-to-end upload; it is the
+only check that can catch this.
 
 Verify Jellyfin can actually read an uploaded file:
 
